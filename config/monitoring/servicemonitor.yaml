@@ -1,0 +1,46 @@
+---
+# ServiceMonitor for the operator manager.
+# Requires the Prometheus Operator CRDs (from kube-prometheus-stack).
+# If using the minimal Prometheus deployment from prometheus-stack.yaml,
+# scrape discovery is handled via kubernetes_sd_configs instead.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: selfheal-manager
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: selfheal-network-operator
+    app.kubernetes.io/component: manager
+spec:
+  namespaceSelector:
+    matchNames:
+      - netprobe-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: manager
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics
+
+---
+# ServiceMonitor for agent pods.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: selfheal-agent
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: selfheal-network-operator
+    app.kubernetes.io/component: agent
+spec:
+  namespaceSelector:
+    matchNames:
+      - netprobe-system
+  selector:
+    matchLabels:
+      app: netprobe-agent
+  endpoints:
+    - port: control
+      interval: 15s
+      path: /metrics

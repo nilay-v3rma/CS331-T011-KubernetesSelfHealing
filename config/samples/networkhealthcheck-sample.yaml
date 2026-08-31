@@ -1,0 +1,16 @@
+apiVersion: network.selfheal.io/v1alpha1
+kind: NetworkHealthCheck
+metadata:
+  name: cluster-mesh
+spec:
+  interval: "15s"
+  probeTimeout: "2s"
+  probeType: TCP
+  topology: FullMesh
+  sampleDegree: 3
+  failureThreshold: 3
+  successThreshold: 2
+  maxConcurrentProbes: 64
+  remediation:
+    enabled: false
+    dryRun: true

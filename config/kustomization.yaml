@@ -1,0 +1,9 @@
+resources:
+- namespace.yaml
+- crd/networkhealthcheck-crd.yaml
+- rbac/service-account.yaml
+- rbac/role.yaml
+- rbac/role-binding.yaml
+- manager/deployment.yaml
+- agent/daemonset.yaml
+- agent/service.yaml

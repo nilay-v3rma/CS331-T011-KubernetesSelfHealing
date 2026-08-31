@@ -1,0 +1,8 @@
+{
+  "worker1->worker2": { "success": false, "lossRate": 1.0, "rttMillis": 0.0, "error": "dial tcp: i/o timeout" },
+  "worker1->worker3": { "success": true, "lossRate": 0.0, "rttMillis": 0.5 },
+  "worker2->worker1": { "success": false, "lossRate": 1.0, "rttMillis": 0.0, "error": "dial tcp: i/o timeout" },
+  "worker2->worker3": { "success": false, "lossRate": 1.0, "rttMillis": 0.0, "error": "dial tcp: i/o timeout" },
+  "worker3->worker1": { "success": true, "lossRate": 0.0, "rttMillis": 0.5 },
+  "worker3->worker2": { "success": false, "lossRate": 1.0, "rttMillis": 0.0, "error": "dial tcp: i/o timeout" }
+}

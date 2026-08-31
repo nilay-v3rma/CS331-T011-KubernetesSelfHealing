@@ -1,0 +1,62 @@
+# ==========================================
+# Go Binaries & Artifacts
+# ==========================================
+# Compiled binaries
+bin/
+dist/
+*.exe
+*.exe-e
+*.dll
+*.so
+*.dylib
+
+# Test binaries & coverage reports
+*.test
+*.out
+*.prof
+*.test.bin
+*.coverprofile
+coverage.txt
+
+# Dependency directory (uncomment if you do not vendor dependencies)
+# vendor/
+
+
+# ==========================================
+# Kubernetes, Helm & Local Cluster Artifacts
+# ==========================================
+# Local cluster state and configs
+.kube/
+kubeconfig
+*.kubeconfig
+
+# Environment variables & secret files
+.env
+.env.*
+!.env.example
+*.secret.yaml
+*.secret.yml
+*.local.yaml
+*.local.yml
+
+# Rendered manifests & package archives
+*.rendered.yaml
+*.rendered.yml
+charts/*.tgz
+
+# Development tool caches (Skaffold, Minikube, Kind)
+.skaffold/
+.minikube/
+
+
+# ==========================================
+# VS Code
+# ==========================================
+# Ignore user-specific workspace overrides and local history
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+.history/

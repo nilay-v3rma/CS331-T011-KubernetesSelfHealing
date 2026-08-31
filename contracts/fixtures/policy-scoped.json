@@ -1,0 +1,8 @@
+{
+  "worker1->worker2": { "success": false, "lossRate": 1.0, "rttMillis": 0.0, "error": "connection refused" },
+  "worker1->worker3": { "success": false, "lossRate": 1.0, "rttMillis": 0.0, "error": "connection refused" },
+  "worker2->worker1": { "success": false, "lossRate": 1.0, "rttMillis": 0.0, "error": "connection refused" },
+  "worker2->worker3": { "success": false, "lossRate": 1.0, "rttMillis": 0.0, "error": "connection refused" },
+  "worker3->worker1": { "success": false, "lossRate": 1.0, "rttMillis": 0.0, "error": "connection refused" },
+  "worker3->worker2": { "success": false, "lossRate": 1.0, "rttMillis": 0.0, "error": "connection refused" }
+}

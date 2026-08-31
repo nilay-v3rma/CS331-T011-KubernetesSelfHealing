@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: selfheal-manager
+  namespace: netprobe-system
+  labels:
+    app.kubernetes.io/name: selfheal-network-operator
+    app.kubernetes.io/component: manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: selfheal-network-operator
+      app.kubernetes.io/component: manager
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: selfheal-network-operator
+        app.kubernetes.io/component: manager
+    spec:
+      serviceAccountName: selfheal-manager
+      containers:
+      - name: manager
+        image: selfheal-manager:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--leader-elect=true"
+        ports:
+        - containerPort: 8080
+          name: metrics
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 100m
+            memory: 64Mi

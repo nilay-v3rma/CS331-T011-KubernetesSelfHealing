@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go test
+        run: go test ./... -v -race -count=1
+
+  build-images:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build manager image
+        run: docker build -t selfheal-manager:ci -f Dockerfile .
+
+      - name: Build agent image
+        run: docker build -t selfheal-agent:ci -f Dockerfile.agent .
+
+  smoke-test:
+    name: KIND Smoke Test
+    runs-on: ubuntu-latest
+    needs: build-images
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Install KIND
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Create KIND cluster
+        run: |
+          kind create cluster --name pod-pod-selfheal --config hack/kind-cluster.yaml
+          # Install Calico
+          kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml
+          # Wait for nodes
+          kubectl wait --for=condition=Ready nodes --all --timeout=300s
+
+      - name: Build and load images
+        run: |
+          docker build -t selfheal-manager:latest -f Dockerfile .
+          docker build -t selfheal-agent:latest -f Dockerfile.agent .
+          kind load docker-image selfheal-manager:latest --name pod-pod-selfheal
+          kind load docker-image selfheal-agent:latest --name pod-pod-selfheal
+
+      - name: Deploy
+        run: kubectl apply -k config/
+
+      - name: Verify operator is running
+        run: |
+          kubectl wait --for=condition=Available deployment/selfheal-manager \
+            -n netprobe-system --timeout=120s
+
+      - name: Verify agents are running
+        run: |
+          # Wait for DaemonSet pods to be ready
+          sleep 15
+          EXPECTED=$(kubectl get nodes --no-headers -l '!node-role.kubernetes.io/control-plane' | wc -l)
+          READY=$(kubectl get pods -n netprobe-system -l app=netprobe-agent \
+            --field-selector=status.phase=Running --no-headers | wc -l)
+          echo "Expected: ${EXPECTED}, Ready: ${READY}"
+          if [ "${READY}" -lt "${EXPECTED}" ]; then
+            echo "Not all agent pods are running!"
+            kubectl get pods -n netprobe-system -o wide
+            exit 1
+          fi
+
+      - name: Verify sample CR
+        run: |
+          kubectl apply -f config/samples/networkhealthcheck-sample.yaml
+          kubectl get nhc cluster-mesh
+          echo "Sample CR applied successfully"
+
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name pod-pod-selfheal

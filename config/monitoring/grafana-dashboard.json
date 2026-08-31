@@ -1,0 +1,208 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Self-Heal Network Operator — Mesh Health Dashboard",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Mesh Verdict",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "netprobe_mesh_health",
+          "legendFormat": "{{verdict}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "Active", "color": "green" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Classification",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "netprobe_classification == 1",
+          "legendFormat": "{{classification}}"
+        }
+      ]
+    },
+    {
+      "title": "Probe Round Duration",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(netprobe_round_duration_seconds_bucket[5m]))",
+          "legendFormat": "p99 {{topology_mode}}"
+        },
+        {
+          "expr": "histogram_quantile(0.50, rate(netprobe_round_duration_seconds_bucket[5m]))",
+          "legendFormat": "p50 {{topology_mode}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "title": "Pair Reachability (Heatmap)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "netprobe_pair_reachable",
+          "legendFormat": "{{src_node}} → {{dst_node}}",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true },
+            "renameByName": {
+              "src_node": "Source",
+              "dst_node": "Target",
+              "src_pod": "Source Pod",
+              "dst_pod": "Target Pod",
+              "Value": "Reachable"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Reachable" },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "green", "value": 1 }
+                  ]
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "0": { "text": "FAIL" }, "1": { "text": "OK" } } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "title": "Pair RTT (p50)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(netprobe_pair_rtt_seconds_bucket[5m]))",
+          "legendFormat": "{{src_node}} → {{dst_node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "title": "Probe Errors (rate/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 12 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(netprobe_probe_errors_total[5m])",
+          "legendFormat": "{{src_node}}→{{dst_node}} ({{reason}})"
+        }
+      ]
+    },
+    {
+      "title": "Probes Sent (rate/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 14 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "rate(netprobe_probes_sent_total[5m])",
+          "legendFormat": "{{topology_mode}}"
+        }
+      ]
+    },
+    {
+      "title": "Suspect Nodes",
+      "type": "table",
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 18 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "netprobe_classification == 1",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true, "Value": true },
+            "renameByName": {
+              "classification": "Classification",
+              "suspect_node": "Suspect Node"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["selfheal", "network", "operator"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Self-Heal Network Operator — Mesh Health",
+  "uid": "selfheal-mesh-health",
+  "version": 1
+}

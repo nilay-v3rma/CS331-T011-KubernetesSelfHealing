@@ -1,0 +1,14 @@
+--- HEALTH ENDPOINT TEST ---
+{"nodeName":"localhost","podIP":"127.0.0.1","status":"ok"}
+
+
+--- SUCCESSFUL PROBE TEST ---
+{"success":true,"lossRate":0,"rttMillis":0.742,"agentError":false}
+
+
+--- FAILED PROBE TEST (Bad IP) ---
+{"success":false,"lossRate":1,"rttMillis":0,"error":"dial tcp 203.0.113.1:9376: i/o timeout","agentError":false}
+
+
+--- SERVER LOGS ---
+2026/09/01 17:47:03 Starting Self-Healing Network Agent...

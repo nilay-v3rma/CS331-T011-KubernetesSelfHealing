@@ -12,5 +12,5 @@ spec:
   successThreshold: 2
   maxConcurrentProbes: 64
   remediation:
-    enabled: false
-    dryRun: true
+    enabled: true
+    dryRun: false

@@ -11,6 +11,7 @@ RUN go mod download 2>/dev/null || true
 
 # Copy source
 COPY cmd/manager/ cmd/manager/
+COPY internal/ internal/
 COPY pkg/ pkg/
 
 # Build

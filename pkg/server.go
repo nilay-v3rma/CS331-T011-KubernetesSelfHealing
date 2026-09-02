@@ -99,6 +99,8 @@ func (s *Server) Start() {
 	mux.HandleFunc("/probe", s.handleProbe)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 
+	// [P3] This existing agent is the working backend for the operator.
+	// The operator should discover agent pods, call /probe, aggregate results into a matrix, and update the CRD status.
 	if err := http.ListenAndServe(s.ControlPort, mux); err != nil {
 		log.Fatalf("Fatal start HTTP: %v", err)
 	}

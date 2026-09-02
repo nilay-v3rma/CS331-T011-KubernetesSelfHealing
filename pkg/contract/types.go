@@ -1,5 +1,8 @@
 package contract
 
+// [P3] This contract is the shared API for the operator, agent, and classifier.
+// The operator must build a Matrix of source->destination ProbeResults and pass it to the analysis layer.
+
 // ProbeResult is the response from the agent's /probe endpoint. Frozen.
 type ProbeResult struct {
 	Success    bool    `json:"success"`

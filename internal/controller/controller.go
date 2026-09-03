@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nilay-v3rma/pod_to_pod_connectivity_operator_kubernetes/pkg/analysis"
 	"github.com/nilay-v3rma/pod_to_pod_connectivity_operator_kubernetes/pkg/contract"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +31,8 @@ type NetworkHealthCheckSpec struct {
 	MaxConcurrentProbes int
 	RemediationEnabled  bool
 	RemediationDryRun   bool
+	FailureThreshold    int
+	SuccessThreshold    int
 }
 
 type NetworkHealthCheckStatus struct {
@@ -86,7 +89,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, spec NetworkHealthCheckSpec)
 		return contract.Verdict{}, nil, err
 	}
 
-	verdict := StubClassifier(matrix)
+	cfg := analysis.DefaultConfig()
+	if spec.FailureThreshold > 0 {
+		cfg.FailureThreshold = spec.FailureThreshold
+	}
+	if spec.SuccessThreshold > 0 {
+		cfg.SuccessThreshold = spec.SuccessThreshold
+	}
+	_, verdict := analysis.Evaluate(matrix, cfg)
 	return verdict, matrix, nil
 }
 

@@ -76,6 +76,8 @@ func networkHealthCheckSpecFromResource(resource *unstructured.Unstructured) (Ne
 	spec := NetworkHealthCheckSpec{
 		Interval:            15 * time.Second,
 		ProbeTimeout:        2 * time.Second,
+		ProbeCount:          5,
+		ProbePayloadBytes:   1024,
 		MaxConcurrentProbes: 1,
 	}
 
@@ -108,6 +110,22 @@ func networkHealthCheckSpecFromResource(resource *unstructured.Unstructured) (Ne
 	spec.Topology, _, err = unstructured.NestedString(resource.Object, "spec", "topology")
 	if err != nil {
 		return spec, fmt.Errorf("invalid spec.topology: %w", err)
+	}
+
+	probeCount, found, err := unstructured.NestedInt64(resource.Object, "spec", "probeCount")
+	if err != nil {
+		return spec, fmt.Errorf("invalid spec.probeCount: %w", err)
+	}
+	if found && probeCount > 0 {
+		spec.ProbeCount = int(probeCount)
+	}
+
+	probePayloadBytes, found, err := unstructured.NestedInt64(resource.Object, "spec", "probePayloadBytes")
+	if err != nil {
+		return spec, fmt.Errorf("invalid spec.probePayloadBytes: %w", err)
+	}
+	if found && probePayloadBytes > 0 {
+		spec.ProbePayloadBytes = int(probePayloadBytes)
 	}
 
 	maxConcurrent, found, err := unstructured.NestedInt64(resource.Object, "spec", "maxConcurrentProbes")

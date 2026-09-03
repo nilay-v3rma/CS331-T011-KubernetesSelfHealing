@@ -37,7 +37,7 @@ func (r *Reconciler) runProbeRound(ctx context.Context, spec NetworkHealthCheckS
 				defer func() { <-semaphore }()
 
 				key := fmt.Sprintf("%s->%s", src.NodeName, dst.NodeName)
-				result, err := probeEndpoint(ctx, src.ControlURL, dst.PodIP, spec.ProbeTimeout)
+				result, err := probeEndpoint(ctx, src.ControlURL, dst.PodIP, spec.ProbeTimeout, spec.ProbeCount, spec.ProbePayloadBytes)
 				if err != nil {
 					result = contract.ProbeResult{
 						Success:    false,

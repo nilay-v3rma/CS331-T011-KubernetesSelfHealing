@@ -63,9 +63,7 @@ func main() {
 
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "# HELP netprobe_manager_up Manager is running")
-		fmt.Fprintln(w, "# TYPE netprobe_manager_up gauge")
-		fmt.Fprintln(w, "netprobe_manager_up 1")
+		reconciler.WriteMetrics(w)
 	})
 
 	port := envOrDefault("PORT", "8080")

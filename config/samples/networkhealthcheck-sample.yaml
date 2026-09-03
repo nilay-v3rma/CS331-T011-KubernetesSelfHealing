@@ -6,6 +6,8 @@ spec:
   interval: "15s"
   probeTimeout: "2s"
   probeType: TCP
+  probeCount: 5
+  probePayloadBytes: 1024
   topology: FullMesh
   sampleDegree: 3
   failureThreshold: 3

@@ -48,6 +48,12 @@ spec:
                 - TCP
                 - HTTP
                 - ICMP
+              probeCount:
+                type: integer
+                minimum: 1
+              probePayloadBytes:
+                type: integer
+                minimum: 1
               topology:
                 type: string
                 enum:
@@ -79,6 +85,8 @@ spec:
                 type: string
               classification:
                 type: string
+              classificationConfidence:
+                type: number
               suspectNodes:
                 type: array
                 items:

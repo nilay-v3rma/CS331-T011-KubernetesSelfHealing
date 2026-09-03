@@ -352,6 +352,32 @@ func TestReconcileNetworkHealthCheckUpdatesStatus(t *testing.T) {
 	check("conditions status", conditionsOK && len(conditions) == 1, fmt.Sprintf("got %#v", status["conditions"]))
 }
 
+func TestBuildNetworkHealthCheckStatusPreservesUnchangedTransitionTime(t *testing.T) {
+	previousTime := "2026-09-03T10:00:00Z"
+	resource := &unstructured.Unstructured{Object: map[string]interface{}{
+		"status": map[string]interface{}{
+			"conditions": []interface{}{map[string]interface{}{
+				"type":               "Healthy",
+				"status":             "False",
+				"reason":             "NodeEgressFailure",
+				"lastTransitionTime": previousTime,
+			}},
+		},
+	}}
+
+	status := buildNetworkHealthCheckStatus(resource, contract.Verdict{
+		Class:      contract.NodeEgressFailure,
+		Confidence: 1,
+		Summary:    "still failing",
+	}, contract.Matrix{})
+
+	conditions := status["conditions"].([]interface{})
+	condition := conditions[0].(map[string]interface{})
+	if condition["lastTransitionTime"] != previousTime {
+		t.Fatalf("expected unchanged condition to preserve transition time %q, got %#v", previousTime, condition["lastTransitionTime"])
+	}
+}
+
 func TestProbeEndpointParsesResult(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/probe" {
@@ -368,7 +394,7 @@ func TestProbeEndpointParsesResult(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := probeEndpoint(context.Background(), server.URL, "10.0.0.1", 2*time.Second)
+	result, err := probeEndpoint(context.Background(), server.URL, "10.0.0.1", 2*time.Second, 5, 1024)
 	if err != nil {
 		t.Fatalf("probeEndpoint returned error: %v", err)
 	}
@@ -396,7 +422,7 @@ func TestProbeEndpointPreservesDataPlaneTimeoutResult(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := probeEndpoint(context.Background(), server.URL, "10.0.0.1", probeTimeout)
+	result, err := probeEndpoint(context.Background(), server.URL, "10.0.0.1", probeTimeout, 1, 1024)
 	if err != nil {
 		t.Fatalf("probeEndpoint returned error: %v", err)
 	}

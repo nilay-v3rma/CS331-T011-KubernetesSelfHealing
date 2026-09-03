@@ -33,10 +33,26 @@ case "$SCENARIO" in
   F2)
     if [ $CLEAR_MODE -eq 1 ]; then
       echo -e "[$TS] Clearing F2: Node inbound block"
-      docker exec "${TARGET_NODE}" iptables -D INPUT -p tcp --dport 9376 -j DROP || true
+      docker exec "${TARGET_NODE}" iptables -D INPUT -p tcp --dport 9376 -j DROP 2>/dev/null || true
+      AGENT_POD=$(kubectl get pods -n netprobe-system -l app=netprobe-agent \
+        --field-selector "spec.nodeName=${TARGET_NODE},status.phase=Running" \
+        -o jsonpath='{.items[0].metadata.name}')
+      if [[ -n "${AGENT_POD}" ]]; then
+        while kubectl exec -n netprobe-system "${AGENT_POD}" -- \
+          iptables -D INPUT -p tcp --dport 9376 -j DROP 2>/dev/null; do :; done
+      fi
     else
       echo -e "[$TS] Applying F2: Node inbound block"
-      docker exec "${TARGET_NODE}" iptables -I INPUT -p tcp --dport 9376 -j DROP
+      AGENT_POD=$(kubectl get pods -n netprobe-system -l app=netprobe-agent \
+        --field-selector "spec.nodeName=${TARGET_NODE},status.phase=Running" \
+        -o jsonpath='{.items[0].metadata.name}')
+      if [[ -z "${AGENT_POD}" ]]; then
+        echo -e "${RED}Could not determine a Running agent pod on ${TARGET_NODE}${NC}"
+        exit 1
+      fi
+      echo -e "[$TS] Applying F2: Node inbound block inside agent pod ${AGENT_POD}"
+      kubectl exec -n netprobe-system "${AGENT_POD}" -- \
+        iptables -I INPUT 1 -p tcp --dport 9376 -j DROP
     fi
     ;;
   F3)
@@ -68,11 +84,32 @@ case "$SCENARIO" in
   F4)
     if [ $CLEAR_MODE -eq 1 ]; then
       echo -e "[$TS] Clearing F4: CNI agent kill (waiting for DaemonSet)"
+      AGENT_POD=$(kubectl get pods -n netprobe-system -l app=netprobe-agent \
+        --field-selector "spec.nodeName=${TARGET_NODE},status.phase=Running" \
+        -o jsonpath='{.items[0].metadata.name}')
+      if [[ -n "${AGENT_POD}" ]]; then
+        while kubectl exec -n netprobe-system "${AGENT_POD}" -- \
+          iptables -D INPUT -p tcp --dport 9376 -j DROP 2>/dev/null; do :; done
+        while kubectl exec -n netprobe-system "${AGENT_POD}" -- \
+          iptables -D OUTPUT -p tcp --dport 9376 -j DROP 2>/dev/null; do :; done
+      fi
       sleep 5
       kubectl wait --for=condition=Ready pod -n kube-system -l k8s-app=calico-node --field-selector spec.nodeName=${TARGET_NODE} --timeout=60s || true
     else
       echo -e "[$TS] Applying F4: CNI agent kill"
       kubectl delete pod -n kube-system -l k8s-app=calico-node --field-selector spec.nodeName=${TARGET_NODE} --grace-period=0 --force || true
+      AGENT_POD=$(kubectl get pods -n netprobe-system -l app=netprobe-agent \
+        --field-selector "spec.nodeName=${TARGET_NODE},status.phase=Running" \
+        -o jsonpath='{.items[0].metadata.name}')
+      if [[ -z "${AGENT_POD}" ]]; then
+        echo -e "${RED}Could not determine a Running agent pod on ${TARGET_NODE}${NC}"
+        exit 1
+      fi
+      echo -e "[$TS] Applying F4: isolating agent pod ${AGENT_POD} on data port 9376"
+      kubectl exec -n netprobe-system "${AGENT_POD}" -- \
+        iptables -I INPUT 1 -p tcp --dport 9376 -j DROP
+      kubectl exec -n netprobe-system "${AGENT_POD}" -- \
+        iptables -I OUTPUT 1 -p tcp --dport 9376 -j DROP
     fi
     ;;
   F5)

@@ -6,6 +6,7 @@ NAMESPACE="${NAMESPACE:-netprobe-system}"
 NHC_NAME="${NHC_NAME:-cluster-mesh}"
 TARGET_NODE="${TARGET_NODE:-pod-pod-selfheal-worker2}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-120}"
+SCENARIOS="${SCENARIOS:-F1 F2 F3 F4 F5 F6}"
 
 log() {
   printf '[%s] %s\n' "$(date -Iseconds)" "$*"
@@ -17,8 +18,10 @@ fail() {
 }
 
 cleanup() {
-  log "Clearing F3 fault"
-  bash hack/inject-fault.sh F3 --clear >/dev/null 2>&1 || true
+  for scenario in ${SCENARIOS}; do
+    log "Clearing ${scenario} fault"
+    bash hack/inject-fault.sh "${scenario}" --clear >/dev/null 2>&1 || true
+  done
 }
 trap cleanup EXIT
 
@@ -55,58 +58,93 @@ wait_for_agent() {
   return 1
 }
 
-agent="$(wait_for_agent)" || fail "no Running agent found on ${TARGET_NODE}"
-old_pod="${agent%% *}"
-old_uid="${agent##* }"
-log "Target agent before fault: ${old_pod} UID=${old_uid}"
+expected_class() {
+  case "$1" in
+    F1|F5) printf '%s\n' "Healthy" ;;
+    F2) printf '%s\n' "NodeIngressFailure" ;;
+    F3) printf '%s\n' "NodeEgressFailure" ;;
+    F4) printf '%s\n' "${F4_EXPECTED_CLASS:-NodeIsolated}" ;;
+    F6) printf '%s\n' "ClusterPartition" ;;
+    *) return 1 ;;
+  esac
+}
 
-log "Clearing any stale F3 rule before the test"
-bash hack/inject-fault.sh F3 --clear >/dev/null 2>&1 || true
-log "Injecting F3 on ${TARGET_NODE}"
-bash hack/inject-fault.sh F3
+expected_suspect() {
+  case "$1" in
+    F2|F3|F4) printf '%s\n' "${TARGET_NODE}" ;;
+    *) printf '%s\n' "" ;;
+  esac
+}
 
-log "Waiting for NodeEgressFailure classification"
-deadline=$((SECONDS + TIMEOUT_SECONDS))
-while (( SECONDS < deadline )); do
-  classification="$(kubectl get nhc "${NHC_NAME}" -o jsonpath='{.status.classification}' 2>/dev/null || true)"
-  suspect="$(kubectl get nhc "${NHC_NAME}" -o jsonpath='{.status.suspectNodes[0]}' 2>/dev/null || true)"
-  log "classification=${classification:-<empty>} suspect=${suspect:-<empty>}"
-  if [[ "${classification}" == "NodeEgressFailure" && "${suspect}" == "${TARGET_NODE}" ]]; then
-    break
+needs_restart() {
+  case "$1" in
+    NodeIngressFailure|NodeEgressFailure|NodeIsolated) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+wait_for_classification() {
+  local wanted_class="$1"
+  local wanted_suspect="${2:-}"
+  local deadline=$((SECONDS + TIMEOUT_SECONDS))
+  classification=""
+  suspect=""
+  while (( SECONDS < deadline )); do
+    classification="$(kubectl get nhc "${NHC_NAME}" -o jsonpath='{.status.classification}' 2>/dev/null || true)"
+    suspect="$(kubectl get nhc "${NHC_NAME}" -o jsonpath='{.status.suspectNodes[0]}' 2>/dev/null || true)"
+    log "classification=${classification:-<empty>} suspect=${suspect:-<empty>} expected=${wanted_class}"
+    if [[ "${classification}" == "${wanted_class}" &&
+      ( -z "${wanted_suspect}" || "${suspect}" == "${wanted_suspect}" ) ]]; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+wait_for_healthy() {
+  wait_for_classification "Healthy"
+}
+
+for scenario in ${SCENARIOS}; do
+  expected="$(expected_class "${scenario}")" || fail "unsupported scenario: ${scenario}"
+  expected_target="$(expected_suspect "${scenario}")"
+  agent="$(wait_for_agent)" || fail "no Running agent found on ${TARGET_NODE}"
+  old_uid="${agent##* }"
+
+  log "Testing ${scenario}: expected classification=${expected}"
+  bash hack/inject-fault.sh "${scenario}"
+  wait_for_classification "${expected}" "${expected_target}" || {
+    kubectl get nhc "${NHC_NAME}" -o yaml || true
+    fail "operator did not classify ${scenario} as ${expected}"
+  }
+
+  if needs_restart "${expected}"; then
+    log "Waiting for the operator-initiated agent restart"
+    deadline=$((SECONDS + TIMEOUT_SECONDS))
+    restarted=0
+    while (( SECONDS < deadline )); do
+      agent="$(agent_pod_for_node || true)"
+      new_uid="${agent##* }"
+      if [[ -n "${new_uid}" && "${new_uid}" != "${old_uid}" ]]; then
+        log "PASS: ${scenario} target agent restarted"
+        restarted=1
+        break
+      fi
+      sleep 3
+    done
+    [[ "${restarted}" -eq 1 ]] || fail "${scenario} target agent UID did not change"
+  else
+    log "PASS: ${scenario} produced ${expected}; no restart is expected"
   fi
-  sleep 5
-done
-[[ "${classification:-}" == "NodeEgressFailure" ]] || fail "operator did not classify ${TARGET_NODE} as NodeEgressFailure"
-[[ "${suspect:-}" == "${TARGET_NODE}" ]] || fail "unexpected suspect node: ${suspect:-<empty>}"
 
-log "Waiting for the operator-initiated agent restart"
-deadline=$((SECONDS + TIMEOUT_SECONDS))
-restarted=0
-while (( SECONDS < deadline )); do
-  agent="$(agent_pod_for_node || true)"
-  new_pod="${agent%% *}"
-  new_uid="${agent##* }"
-  if [[ -n "${new_uid}" && "${new_uid}" != "${old_uid}" ]]; then
-    log "PASS: target agent restarted: ${new_pod} UID=${new_uid}"
-    restarted=1
-    break
-  fi
-  sleep 3
-done
-[[ "${restarted}" -eq 1 ]] || fail "target agent UID did not change"
-
-log "Waiting for Healthy recovery"
-deadline=$((SECONDS + TIMEOUT_SECONDS))
-while (( SECONDS < deadline )); do
-  classification="$(kubectl get nhc "${NHC_NAME}" -o jsonpath='{.status.classification}' 2>/dev/null || true)"
-  log "classification=${classification:-<empty>}"
-  if [[ "${classification}" == "Healthy" ]]; then
-    log "PASS: operator recovered the mesh"
-    kubectl get nhc "${NHC_NAME}" -o yaml
-    exit 0
-  fi
-  sleep 5
+  bash hack/inject-fault.sh "${scenario}" --clear
+  wait_for_healthy || {
+    kubectl get nhc "${NHC_NAME}" -o yaml || true
+    fail "mesh did not return to Healthy after ${scenario}"
+  }
+  log "PASS: ${scenario} recovered to Healthy"
 done
 
-kubectl get nhc "${NHC_NAME}" -o yaml || true
-fail "mesh did not return to Healthy within ${TIMEOUT_SECONDS}s"
+kubectl get nhc "${NHC_NAME}" -o yaml
+log "PASS: all requested scenarios completed"

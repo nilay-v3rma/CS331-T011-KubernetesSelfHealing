@@ -108,6 +108,10 @@ clear-fault:  ## Clear a fault scenario (SCENARIO=F1..F6)
 measure-mttd:  ## Measure MTTD for a scenario (SCENARIO=F2..F6, TRIALS=1)
 	./hack/measure-mttd.sh $(SCENARIO) $(TRIALS)
 
+.PHONY: p5-evaluation
+p5-evaluation:  ## Run the P5 scenario sweep (TRIALS=10 by default)
+	./hack/run-p5-evaluation.sh
+
 # ============================================================================
 # Demo
 # ============================================================================

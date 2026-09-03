@@ -161,11 +161,32 @@ Access:
 |:-------|:-----|:-------|
 | `netprobe_pair_reachable` | Gauge (0/1) | `src_node`, `dst_node`, `src_pod`, `dst_pod` |
 | `netprobe_pair_rtt_seconds` | Histogram | `src_node`, `dst_node` |
+| `netprobe_pair_jitter_seconds` | Gauge | `src_node`, `dst_node` |
+| `netprobe_pair_loss_burst` | Gauge | `src_node`, `dst_node` |
+| `netprobe_pair_throughput_bytes_per_second` | Gauge | `src_node`, `dst_node` |
 | `netprobe_probe_errors_total` | Counter | `src_node`, `dst_node`, `reason` |
 | `netprobe_round_duration_seconds` | Histogram | `topology_mode` |
 | `netprobe_mesh_health` | Gauge | `verdict` |
 | `netprobe_classification` | Gauge (0/1) | `classification`, `suspect_node` |
 | `netprobe_probes_sent_total` | Counter | `topology_mode` |
+
+## P5 Evaluation
+
+P5 measures detection and non-functional behavior from the live `NetworkHealthCheck` status:
+
+```bash
+# One scenario
+make measure-mttd SCENARIO=F5 TRIALS=3
+
+# Full evaluation sweep
+TRIALS=10 ./hack/run-p5-evaluation.sh
+```
+
+Outputs:
+- Raw CSV: `docs/results/mttd-results.csv`
+- Summary table and confusion matrix: `docs/results/p5-summary.md`
+
+Captured metrics include MTTD, RTT/delay, jitter, loss rate, maximum burst loss, synthetic throughput/bandwidth, bytes per round, and probe count.
 
 ## Tech Stack
 

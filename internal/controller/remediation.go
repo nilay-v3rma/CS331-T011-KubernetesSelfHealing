@@ -112,10 +112,11 @@ func (r *Reconciler) ExecuteRemediation(ctx context.Context, plan RemediationPla
 		if _, ok := targets[pod.Spec.NodeName]; !ok {
 			continue
 		}
+		log.Printf("remediation: restarting agent pod %s/%s on node %s for action %s", pod.Namespace, pod.Name, pod.Spec.NodeName, plan.Action)
 		if err := r.Client.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
 			return fmt.Errorf("delete agent pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
-		log.Printf("remediation: deleted agent pod %s/%s for action %s", pod.Namespace, pod.Name, plan.Action)
+		log.Printf("remediation: restart requested; deleted agent pod %s/%s", pod.Namespace, pod.Name)
 	}
 	return nil
 }

@@ -65,18 +65,18 @@ bash hack/inject-fault.sh F3 --clear >/dev/null 2>&1 || true
 log "Injecting F3 on ${TARGET_NODE}"
 bash hack/inject-fault.sh F3
 
-log "Waiting for NodeIsolated classification"
+log "Waiting for NodeEgressFailure classification"
 deadline=$((SECONDS + TIMEOUT_SECONDS))
 while (( SECONDS < deadline )); do
   classification="$(kubectl get nhc "${NHC_NAME}" -o jsonpath='{.status.classification}' 2>/dev/null || true)"
   suspect="$(kubectl get nhc "${NHC_NAME}" -o jsonpath='{.status.suspectNodes[0]}' 2>/dev/null || true)"
   log "classification=${classification:-<empty>} suspect=${suspect:-<empty>}"
-  if [[ "${classification}" == "NodeIsolated" && "${suspect}" == "${TARGET_NODE}" ]]; then
+  if [[ "${classification}" == "NodeEgressFailure" && "${suspect}" == "${TARGET_NODE}" ]]; then
     break
   fi
   sleep 5
 done
-[[ "${classification:-}" == "NodeIsolated" ]] || fail "operator did not classify ${TARGET_NODE} as NodeIsolated"
+[[ "${classification:-}" == "NodeEgressFailure" ]] || fail "operator did not classify ${TARGET_NODE} as NodeEgressFailure"
 [[ "${suspect:-}" == "${TARGET_NODE}" ]] || fail "unexpected suspect node: ${suspect:-<empty>}"
 
 log "Waiting for the operator-initiated agent restart"

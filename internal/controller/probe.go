@@ -15,7 +15,10 @@ import (
 func probeEndpoint(ctx context.Context, controlURL, targetIP string, timeout time.Duration) (contract.ProbeResult, error) {
 	url := fmt.Sprintf("%s/probe?target=%s&timeout=%s&count=1&type=tcp", strings.TrimRight(controlURL, "/"), targetIP, timeout.String())
 
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	// Allow the agent's data-plane probe to reach its timeout and return a result.
+	// The control request needs a small grace period so a probe timeout is not
+	// misclassified as an agent/control-channel failure.
+	ctx, cancel := context.WithTimeout(ctx, timeout+time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

@@ -78,6 +78,7 @@ cluster-down:  ## Tear down KIND cluster
 .PHONY: deploy
 deploy:  ## Deploy all resources via kustomize
 	kubectl apply -k config/
+	kubectl rollout restart deployment/selfheal-manager -n $(NAMESPACE)
 
 .PHONY: undeploy
 undeploy:  ## Remove all deployed resources

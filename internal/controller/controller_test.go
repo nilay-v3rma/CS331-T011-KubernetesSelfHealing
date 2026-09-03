@@ -382,6 +382,29 @@ func TestProbeEndpointParsesResult(t *testing.T) {
 	}
 }
 
+func TestProbeEndpointPreservesDataPlaneTimeoutResult(t *testing.T) {
+	probeTimeout := 20 * time.Millisecond
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * probeTimeout)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(contract.ProbeResult{
+			Success:    false,
+			LossRate:   1,
+			Error:      "dial tcp: i/o timeout",
+			AgentError: false,
+		})
+	}))
+	defer server.Close()
+
+	result, err := probeEndpoint(context.Background(), server.URL, "10.0.0.1", probeTimeout)
+	if err != nil {
+		t.Fatalf("probeEndpoint returned error: %v", err)
+	}
+	if result.Success || result.LossRate != 1 || result.AgentError {
+		t.Fatalf("expected data-plane timeout result, got success=%v lossRate=%v agentError=%v", result.Success, result.LossRate, result.AgentError)
+	}
+}
+
 func TestPlanRemediationPrintsMatrixAndPassFail(t *testing.T) {
 	matrix := contract.Matrix{
 		"node-a->node-b": {Success: false, LossRate: 1, RTTMillis: 0, Error: "timeout", AgentError: false},

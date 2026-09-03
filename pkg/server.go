@@ -3,10 +3,12 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"time"
 )
 
 type Server struct {
@@ -46,7 +48,11 @@ func (s *Server) startDataListener() {
 		if err != nil {
 			continue
 		}
-		conn.Close()
+		go func(conn net.Conn) {
+			defer conn.Close()
+			_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+			_, _ = io.Copy(io.Discard, conn)
+		}(conn)
 	}
 }
 

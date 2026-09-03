@@ -127,5 +127,21 @@ func networkHealthCheckSpecFromResource(resource *unstructured.Unstructured) (Ne
 		return spec, fmt.Errorf("invalid spec.remediation.dryRun: %w", err)
 	}
 
+	failureThreshold, found, err := unstructured.NestedInt64(resource.Object, "spec", "failureThreshold")
+	if err != nil {
+		return spec, fmt.Errorf("invalid spec.failureThreshold: %w", err)
+	}
+	if found {
+		spec.FailureThreshold = int(failureThreshold)
+	}
+
+	successThreshold, found, err := unstructured.NestedInt64(resource.Object, "spec", "successThreshold")
+	if err != nil {
+		return spec, fmt.Errorf("invalid spec.successThreshold: %w", err)
+	}
+	if found {
+		spec.SuccessThreshold = int(successThreshold)
+	}
+
 	return spec, nil
 }

@@ -46,5 +46,7 @@ spec:
             memory: 32Mi
         securityContext:
           capabilities:
+            add:
+            - NET_ADMIN
             drop:
             - NET_RAW

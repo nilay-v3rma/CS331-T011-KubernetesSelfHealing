@@ -432,6 +432,91 @@ func TestPlanRemediationPrintsMatrixAndPassFail(t *testing.T) {
 	check("low confidence refusal", lowConfidence.Action == NoAction && !lowConfidence.Execute, fmt.Sprintf("action=%q execute=%v reason=%q", lowConfidence.Action, lowConfidence.Execute, lowConfidence.Reason))
 }
 
+func TestStubClassifierPrintsVerdictPassFail(t *testing.T) {
+	buildMatrix := func(failedPairs ...string) contract.Matrix {
+		failed := make(map[string]bool, len(failedPairs))
+		for _, pair := range failedPairs {
+			failed[pair] = true
+		}
+		matrix := contract.Matrix{}
+		for _, source := range []string{"node-a", "node-b", "node-c"} {
+			for _, destination := range []string{"node-a", "node-b", "node-c"} {
+				if source == destination {
+					continue
+				}
+				key := pairKey(source, destination)
+				matrix[key] = contract.ProbeResult{Success: !failed[key], LossRate: 0, RTTMillis: 10}
+				if failed[key] {
+					matrix[key] = contract.ProbeResult{Success: false, LossRate: 1, Error: "timeout"}
+				}
+			}
+		}
+		return matrix
+	}
+
+	tests := []struct {
+		name           string
+		matrix         contract.Matrix
+		expectedClass  contract.Classification
+		expectedTarget string
+	}{
+		{name: "healthy", matrix: buildMatrix(), expectedClass: contract.Healthy},
+		{name: "pair local", matrix: buildMatrix("node-a->node-b"), expectedClass: contract.PairLocalFailure},
+		{name: "single node outbound failure", matrix: buildMatrix("node-a->node-b", "node-a->node-c"), expectedClass: contract.NodeIsolated, expectedTarget: "node-a"},
+		{name: "single node inbound failure", matrix: buildMatrix("node-b->node-a", "node-c->node-a"), expectedClass: contract.NodeIsolated, expectedTarget: "node-a"},
+		{name: "node isolated", matrix: buildMatrix("node-a->node-b", "node-a->node-c", "node-b->node-a", "node-c->node-a"), expectedClass: contract.NodeIsolated, expectedTarget: "node-a"},
+		{name: "cluster partition", matrix: buildMatrix("node-a->node-b", "node-a->node-c", "node-b->node-a", "node-b->node-c", "node-c->node-a", "node-c->node-b"), expectedClass: contract.ClusterPartition},
+		{name: "ambiguous", matrix: buildMatrix("node-a->node-b", "node-b->node-c"), expectedClass: contract.Unknown},
+	}
+
+	check := func(name string, passed bool, detail string) {
+		status := "PASS"
+		if !passed {
+			status = "FAIL"
+			t.Errorf("%s: %s", name, detail)
+		}
+		t.Logf("%s: %s - %s", status, name, detail)
+	}
+
+	for _, test := range tests {
+		for key, result := range test.matrix {
+			t.Logf("matrix[%s] = success=%v lossRate=%v rttMillis=%v error=%q agentError=%v", key, result.Success, result.LossRate, result.RTTMillis, result.Error, result.AgentError)
+		}
+		verdict := StubClassifier(test.matrix)
+		targetOK := test.expectedTarget == "" || len(verdict.SuspectNodes) == 1 && verdict.SuspectNodes[0] == test.expectedTarget
+		check(test.name+" classification", verdict.Class == test.expectedClass, fmt.Sprintf("got %q, want %q", verdict.Class, test.expectedClass))
+		check(test.name+" target", targetOK, fmt.Sprintf("got %v, want %q", verdict.SuspectNodes, test.expectedTarget))
+		t.Logf("verdict[%s] = class=%s confidence=%v suspectNodes=%v summary=%q", test.name, verdict.Class, verdict.Confidence, verdict.SuspectNodes, verdict.Summary)
+	}
+}
+
+func TestStubClassifierHandlesIsolatedAgentControlFailure(t *testing.T) {
+	matrix := contract.Matrix{
+		"node-a->node-b": {Success: true, LossRate: 0},
+		"node-a->node-c": {Success: true, LossRate: 0},
+		"node-b->node-a": {Success: false, LossRate: 1, Error: "i/o timeout"},
+		"node-b->node-c": {Success: false, LossRate: 1, Error: "context deadline exceeded", AgentError: true},
+		"node-c->node-a": {Success: true, LossRate: 0},
+		"node-c->node-b": {Success: true, LossRate: 0},
+	}
+
+	for key, result := range matrix {
+		t.Logf("matrix[%s] = success=%v lossRate=%v rttMillis=%v error=%q agentError=%v", key, result.Success, result.LossRate, result.RTTMillis, result.Error, result.AgentError)
+	}
+
+	verdict := StubClassifier(matrix)
+	if verdict.Class != contract.NodeIsolated {
+		t.Errorf("FAIL: classification = %q, want %q", verdict.Class, contract.NodeIsolated)
+	} else {
+		t.Logf("PASS: classification = %q", verdict.Class)
+	}
+	if len(verdict.SuspectNodes) != 1 || verdict.SuspectNodes[0] != "node-b" {
+		t.Errorf("FAIL: suspect nodes = %v, want [node-b]", verdict.SuspectNodes)
+	} else {
+		t.Logf("PASS: suspect nodes = %v", verdict.SuspectNodes)
+	}
+}
+
 func TestExecuteRemediationDeletesOnlySuspectAgent(t *testing.T) {
 	client := fake.NewSimpleClientset(
 		&corev1.Pod{

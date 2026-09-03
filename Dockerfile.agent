@@ -16,11 +16,13 @@ COPY pkg/ pkg/
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o agent ./cmd/agent/
 
 # --- Runtime stage ---
-FROM gcr.io/distroless/static:nonroot
+# Alpine provides iptables for the controlled KIND fault-injection test.
+FROM alpine:3.20
+
+RUN apk add --no-cache iptables
 
 WORKDIR /
 COPY --from=builder /workspace/agent .
-USER 65532:65532
 
 EXPOSE 8080 9376
 

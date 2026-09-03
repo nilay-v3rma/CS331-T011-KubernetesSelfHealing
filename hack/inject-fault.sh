@@ -42,10 +42,27 @@ case "$SCENARIO" in
   F3)
     if [ $CLEAR_MODE -eq 1 ]; then
       echo -e "[$TS] Clearing F3: Node outbound block"
-      docker exec "${TARGET_NODE}" iptables -D OUTPUT -p tcp --dport 9376 -j DROP || true
+      AGENT_POD=$(kubectl get pods -n netprobe-system -l app=netprobe-agent \
+        --field-selector "spec.nodeName=${TARGET_NODE},status.phase=Running" \
+        -o jsonpath='{.items[0].metadata.name}')
+      if [[ -n "${AGENT_POD}" ]]; then
+        while kubectl exec -n netprobe-system "${AGENT_POD}" -- \
+          iptables -D OUTPUT -p tcp --dport 9376 -j DROP 2>/dev/null; do :; done
+      fi
     else
-      echo -e "[$TS] Applying F3: Node outbound block"
-      docker exec "${TARGET_NODE}" iptables -I OUTPUT -p tcp --dport 9376 -j DROP
+      AGENT_POD_IP=$(kubectl get pods -n netprobe-system -l app=netprobe-agent \
+        --field-selector "spec.nodeName=${TARGET_NODE},status.phase=Running" \
+        -o jsonpath='{.items[0].status.podIP}')
+      AGENT_POD=$(kubectl get pods -n netprobe-system -l app=netprobe-agent \
+        --field-selector "spec.nodeName=${TARGET_NODE},status.phase=Running" \
+        -o jsonpath='{.items[0].metadata.name}')
+      if [[ -z "${AGENT_POD_IP}" || -z "${AGENT_POD}" ]]; then
+        echo -e "${RED}Could not determine a Running agent pod on ${TARGET_NODE}${NC}"
+        exit 1
+      fi
+      echo -e "[$TS] Applying F3: Node outbound block inside agent pod ${AGENT_POD} (${AGENT_POD_IP})"
+      kubectl exec -n netprobe-system "${AGENT_POD}" -- \
+        iptables -I OUTPUT 1 -p tcp --dport 9376 -j DROP
     fi
     ;;
   F4)

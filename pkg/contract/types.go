@@ -5,11 +5,21 @@ package contract
 
 // ProbeResult is the response from the agent's /probe endpoint. Frozen.
 type ProbeResult struct {
-	Success    bool    `json:"success"`
-	LossRate   float64 `json:"lossRate"`
-	RTTMillis  float64 `json:"rttMillis"`
-	Error      string  `json:"error,omitempty"`
-	AgentError bool    `json:"agentError"` // true = control channel failed, NOT a data plane fault
+	Success       bool    `json:"success"`
+	LossRate      float64 `json:"lossRate"`
+	RTTMillis     float64 `json:"rttMillis"`
+	RTTMinMillis  float64 `json:"rttMinMillis,omitempty"`
+	RTTMaxMillis  float64 `json:"rttMaxMillis,omitempty"`
+	JitterMillis  float64 `json:"jitterMillis,omitempty"`
+	BurstLossMax  int     `json:"burstLossMax,omitempty"`
+	ThroughputBPS float64 `json:"throughputBps,omitempty"`
+	BandwidthBPS  float64 `json:"bandwidthBps,omitempty"`
+	BytesSent     int64   `json:"bytesSent,omitempty"`
+	ProbeCount    int     `json:"probeCount,omitempty"`
+	Successful    int     `json:"successfulProbes,omitempty"`
+	DurationMillis float64 `json:"durationMillis,omitempty"`
+	Error          string  `json:"error,omitempty"`
+	AgentError     bool    `json:"agentError"` // true = control channel failed, NOT a data plane fault
 }
 
 // Endpoint represents a single agent pod in the mesh.

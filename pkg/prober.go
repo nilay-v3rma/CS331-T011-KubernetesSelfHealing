@@ -34,7 +34,7 @@ func ParseProbeOptions(query url.Values) (ProbeOptions, error) {
 	timeoutStr := query.Get("timeout")
 
 	if timeoutStr != "" {
-		if parsedTimeout, err := time.ParseDuration(timeoutStr); err != nil && parsedTimeout > 0 {
+		if parsedTimeout, err := time.ParseDuration(timeoutStr); err == nil && parsedTimeout > 0 {
 			timeout = parsedTimeout
 		}
 	}

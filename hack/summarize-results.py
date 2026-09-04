@@ -109,6 +109,7 @@ def main():
         "- Jitter is the standard deviation of successful probe RTT samples in one directed pair round.",
         "- Throughput is a synthetic payload-write rate, useful for comparing runs in the same KIND setup, not an absolute NIC bandwidth benchmark.",
         "- Burst loss is the longest consecutive failed probe streak inside a directed pair round.",
+        "- Timeout rows are included in accuracy, but probe-level averages are marked n/a because no completed detection row was produced.",
     ])
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

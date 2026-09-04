@@ -202,6 +202,21 @@ Captured metrics include MTTD, RTT/delay, jitter, loss rate, maximum burst loss,
 | Fault injection | docker exec + iptables/tc netem |
 | Monitoring | Prometheus + Grafana |
 
+## Team Details
+
+| Field | Value |
+|:------|:------|
+| Team ID | 11 |
+| Project ID | 7 |
+
+| Name | Roll Number |
+|:-----|:------------|
+| Nilay Verma | 23110219 |
+| Siddhesh Umarjee | 23110347 |
+| Patel Ridham Vijaykumar | 23110238 |
+| Eshan Jaiswal | 24110116 |
+| Anurag Singh | 24110061 |
+
 ## Team Roles
 
 | Person | Artifact | Directory |

@@ -54,7 +54,7 @@
 \begin{abstract}
 Kubernetes is good at checking whether a container is running, but it does not continuously check whether one pod can reach another pod across the cluster network. This difference matters. A pod can be marked \code{Running} and \code{Ready}, while traffic from that pod to another node is silently dropped because of a CNI issue, a firewall rule, packet loss, or a broad \code{NetworkPolicy}.
 
-This project builds a Kubernetes operator that measures pod-to-pod connectivity from multiple nodes. It deploys one lightweight probe agent on each node, asks these agents to probe each other, builds a directed reachability matrix, classifies the shape of failures, exposes the result through a Kubernetes custom resource, and records measurements for evaluation. The project is divided into five parts: platform setup, probe agent, operator/controller, analysis/classification, and evaluation.
+This project builds a Kubernetes operator that measures pod-to-pod connectivity from multiple nodes. It deploys one lightweight probe agent on each node, asks these agents to probe each other, builds a directed reachability matrix, classifies the shape of failures, exposes the result through a Kubernetes custom resource, and records measurements for evaluation. The project is divided into five implementation areas: platform setup, probe agent, operator/controller, analysis/classification, and evaluation.
 
 The main contribution is not only detecting that the network is unhealthy. The system also tries to explain where the failure is likely located, such as a node egress problem, node ingress problem, isolated node, pair-specific failure, policy-related failure, or wider cluster partition.
 \end{abstract}
@@ -149,14 +149,16 @@ Existing tools solve parts of this problem, but not the full problem addressed h
 \midrule
 Kubernetes liveness/readiness probes & Check whether a container responds & Do not test pod-to-pod paths across nodes \\
 Node conditions & Report node-level health & Do not show which pod-to-pod paths fail \\
-Goldpinger & Runs agents and shows a connectivity graph & Primarily an observability tool, not a Kubernetes status-driven operator with classification \\
+Goldpinger & Runs as a Kubernetes DaemonSet, tests connectivity between its instances, shows a graph, and exposes Prometheus metrics & Solves detection and visibility well, but does not provide this project's CRD status model, matrix-based failure localization, remediation guardrails, or evaluation workflow \\
 Prometheus blackbox exporter & Runs synthetic probes & Usually probes from one location unless many targets are manually configured \\
 Service mesh telemetry & Observes real application traffic & Passive; idle paths may stay untested \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
-This project combines active probing, a Kubernetes custom resource, classification, and evaluation scripts in one small system.
+Goldpinger is the closest open-source baseline for this project.\footnote{\url{https://github.com/bloomberg/goldpinger}} It tackles the same broad problem up to connectivity detection: it answers whether different parts of the cluster can reach each other and makes that information visible. Our project keeps that useful active-probing idea, but adds a few layers on top. It stores the result as Kubernetes custom resource status, classifies the shape of the failure, reports richer non-functional measurements, and includes a repeatable evaluation workflow. In short, Goldpinger tells us that connectivity is broken; this project also tries to say what kind of break it is and how it behaves over time.
+
+This project therefore combines active probing, a Kubernetes custom resource, classification, and evaluation scripts in one small system.
 
 \section{System Overview}
 
@@ -232,15 +234,15 @@ The result is stored as a matrix. A directed matrix means \code{node-a -> node-b
 \label{fig:matrix}
 \end{figure}
 
-\section{P1: Platform and Deployment}
+\section{Platform and Deployment}
 
-P1 provides the environment in which the rest of the project runs. The repository uses KIND to create a local multi-node Kubernetes cluster. KIND is useful for this project because each Kubernetes node is a Docker container. That makes fault injection repeatable through commands such as \code{iptables} and \code{tc netem}.
+The platform layer provides the environment in which the rest of the project runs. The repository uses KIND to create a local multi-node Kubernetes cluster. KIND is useful for this project because each Kubernetes node is a Docker container. That makes fault injection repeatable through commands such as \code{iptables} and \code{tc netem}.
 
 The cluster configuration is stored in \code{hack/kind-cluster.yaml}. The project uses one control-plane node and three worker nodes. Calico is used as the CNI plugin, and the default KIND CNI is disabled. This gives a real pod network and supports the network policy scenarios used later.
 
 \begin{table}[h]
 \centering
-\caption{P1 platform files}
+\caption{Platform files}
 \begin{tabularx}{\textwidth}{@{}lY@{}}
 \toprule
 \textbf{File} & \textbf{Purpose} \\
@@ -258,9 +260,9 @@ The cluster configuration is stored in \code{hack/kind-cluster.yaml}. The projec
 
 The \code{Makefile} keeps project operation simple. For example, \code{make cluster-up} creates the cluster, \code{make images} builds images, \code{make load} loads them into KIND, and \code{make deploy} applies the Kubernetes manifests.
 
-\section{P2: Probe Agent}
+\section{Distributed Probe Agent}
 
-P2 implements the agent that runs on every node. The agent is deployed as a DaemonSet, which means Kubernetes schedules one copy on each node. The manifest is in \path{config/agent/daemonset.yaml}.
+The distributed probe agent runs on every node. The agent is deployed as a DaemonSet, which means Kubernetes schedules one copy on each node. The manifest is in \path{config/agent/daemonset.yaml}.
 
 Each agent exposes two ports.
 
@@ -300,9 +302,9 @@ The probe endpoint accepts parameters such as target address, timeout, count, an
 
 This means the agent supports both functional measurement and non-functional measurement. Functional measurement answers ``can it connect?'' Non-functional measurement answers ``how well did it connect?''
 
-\section{P3: Operator and Kubernetes API}
+\section{Operator and Kubernetes API}
 
-P3 implements the operator logic. The operator periodically reads \code{NetworkHealthCheck} resources, discovers running agent pods, asks agents to probe each other, stores the matrix, and writes status back to Kubernetes.
+The operator implements the control logic. It periodically reads \code{NetworkHealthCheck} resources, discovers running agent pods, asks agents to probe each other, stores the matrix, and writes status back to Kubernetes.
 
 The custom resource definition is in \code{config/crd/networkhealthcheck-crd.yaml}. A sample object is in \code{config/samples/networkhealthcheck-sample.yaml}.
 
@@ -362,11 +364,11 @@ The status fields are shown in Table~\ref{tab:status}.
 \end{tabularx}
 \end{table}
 
-The controller preserves \code{lastTransitionTime} when the condition has not actually changed. This is important for P5 because detection latency depends on the time when the system first moved from healthy to unhealthy.
+The controller preserves \code{lastTransitionTime} when the condition has not actually changed. This is important for evaluation because detection latency depends on the time when the system first moved from healthy to unhealthy.
 
-\section{P4: Analysis and Classification}
+\section{Analysis and Failure Classification}
 
-P4 is the analysis layer. It takes the directed matrix and returns a verdict.
+The analysis layer takes the directed matrix and returns a verdict.
 
 The classifier is implemented in \code{pkg/analysis/classifier.go}. It is designed to be simple enough to explain and test. It does not need machine learning. It uses the shape of failures in the matrix.
 
@@ -484,15 +486,15 @@ F6 & Apply deny-all \code{NetworkPolicy} & \code{ClusterPartition} or \code{Poli
 
 These scenarios allow the project to test both complete failures and degraded behavior. Complete failures mainly affect classification. Partial packet loss is especially useful for robustness metrics such as loss rate, jitter, and burst loss.
 
-\section{P5: Evaluation}
+\section{Evaluation Methodology}
 
-P5 evaluates the system using repeatable experiments. The key script is \code{hack/measure-mttd.sh}. It clears previous faults, injects a chosen scenario, records the injection timestamp, polls the \code{NetworkHealthCheck} status, and writes a CSV row when an unhealthy transition is observed.
+The evaluation layer measures the system using repeatable experiments. The key script is \code{hack/measure-mttd.sh}. It clears previous faults, injects a chosen scenario, records the injection timestamp, polls the \code{NetworkHealthCheck} status, and writes a CSV row when an unhealthy transition is observed.
 
 The evaluation uses the scenarios listed in Table~\ref{tab:p5-scenarios}. These scenarios were selected because each one creates a different shape in the directed reachability matrix. This is important because the classifier does not simply count failures. It looks at where the failures appear: in one row, in one column, around one node, across the whole cluster, or as partial loss.
 
 \begin{table}[h]
 \centering
-\caption{Specific scenarios used in P5}
+\caption{Specific scenarios used in evaluation}
 \label{tab:p5-scenarios}
 \scriptsize
 \begin{tabularx}{\textwidth}{@{}lYYYY@{}}
@@ -509,7 +511,7 @@ F6 & A deny-all \code{NetworkPolicy} is applied in the agent namespace. & Create
 \end{tabularx}
 \end{table}
 
-For the main P5 run, F2 through F6 are repeated because they are actual injected faults. F1 is used as the healthy starting point and cleanup baseline before each trial. This keeps each trial independent from the previous one.
+For the main evaluation run, F2 through F6 are repeated because they are actual injected faults. F1 is used as the healthy starting point and cleanup baseline before each trial. This keeps each trial independent from the previous one.
 
 The full sweep is run with:
 
@@ -529,7 +531,7 @@ The raw output is stored in \code{docs/results/mttd-results.csv}. The summary sc
 
 \begin{table}[h]
 \centering
-\caption{CSV columns produced by the P5 scripts}
+\caption{CSV columns produced by the evaluation scripts}
 \begin{tabularx}{\textwidth}{@{}lY@{}}
 \toprule
 \textbf{Column} & \textbf{Meaning} \\
@@ -646,6 +648,6 @@ This project builds a small but complete system for active pod-to-pod network he
 
 The design improves on basic health checks because it measures the actual paths between pods. It also improves on simple dashboards because the result becomes part of Kubernetes state and can be evaluated through repeatable experiments.
 
-From P1 to P5, the project covers platform setup, agent implementation, operator control logic, classification, safety-aware remediation planning, and evaluation. The final system can detect connectivity failures, report where they are likely located, and measure performance and robustness indicators such as latency, throughput, loss, burst loss, and jitter.
+Across its five implementation areas, the project covers platform setup, agent implementation, operator control logic, classification, safety-aware remediation planning, and evaluation. The final system can detect connectivity failures, report where they are likely located, and measure performance and robustness indicators such as latency, throughput, loss, burst loss, and jitter.
 
 \end{document}

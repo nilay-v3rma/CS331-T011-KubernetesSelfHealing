@@ -18,6 +18,14 @@ def mean(values):
     return statistics.fmean(clean) if clean else 0.0
 
 
+def fmt_metric(rows, field, precision=3):
+    values = [number(row.get(field)) for row in rows]
+    clean = [value for value in values if value is not None]
+    if not clean:
+        return "n/a"
+    return f"{statistics.fmean(clean):.{precision}f}"
+
+
 def main():
     if len(sys.argv) != 3:
         print("Usage: summarize-results.py <mttd-results.csv> <summary.md>")
@@ -34,9 +42,10 @@ def main():
     by_scenario = defaultdict(list)
     confusion = Counter()
 
-    for row in completed:
+    for row in rows:
         by_scenario[row["scenario"]].append(row)
-        confusion[(row.get("true_class", "Unknown"), row.get("predicted_class", "Unknown"))] += 1
+        predicted = row.get("predicted_class") or "TIMEOUT"
+        confusion[(row.get("true_class", "Unknown"), predicted)] += 1
 
     lines = [
         "# P5 Evaluation Summary",
@@ -53,21 +62,32 @@ def main():
 
     for scenario in sorted(by_scenario):
         group = by_scenario[scenario]
+        completed_group = [row for row in group if row.get("mttd_ms") not in ("", "TIMEOUT", None)]
         correct = sum(1 for row in group if row.get("predicted_class") == row.get("true_class"))
         accuracy = correct / len(group) if group else 0
+        mttd = fmt_metric(completed_group, "mttd_ms", precision=1)
+        rtt = fmt_metric(completed_group, "avg_rtt_ms", precision=3)
+        jitter = fmt_metric(completed_group, "avg_jitter_ms", precision=3)
+        loss = fmt_metric(completed_group, "avg_loss_rate", precision=3)
+        burst_values = [number(row.get("max_burst_loss")) for row in completed_group]
+        burst_clean = [value for value in burst_values if value is not None]
+        burst = f"{max(burst_clean):.0f}" if burst_clean else "n/a"
+        throughput = fmt_metric(completed_group, "avg_throughput_bps", precision=2)
+        bytes_sent = fmt_metric(completed_group, "total_bytes_sent", precision=1)
+        probes = fmt_metric(completed_group, "probe_count", precision=1)
         lines.append(
-            "| {scenario} | {trials} | {accuracy:.2f} | {mttd:.1f} | {rtt:.3f} | {jitter:.3f} | {loss:.3f} | {burst:.0f} | {throughput:.2f} | {bytes_sent:.1f} | {probes:.1f} |".format(
+            "| {scenario} | {trials} | {accuracy:.2f} | {mttd} | {rtt} | {jitter} | {loss} | {burst} | {throughput} | {bytes_sent} | {probes} |".format(
                 scenario=scenario,
                 trials=len(group),
                 accuracy=accuracy,
-                mttd=mean(number(row.get("mttd_ms")) for row in group),
-                rtt=mean(number(row.get("avg_rtt_ms")) for row in group),
-                jitter=mean(number(row.get("avg_jitter_ms")) for row in group),
-                loss=mean(number(row.get("avg_loss_rate")) for row in group),
-                burst=max((number(row.get("max_burst_loss")) or 0 for row in group), default=0),
-                throughput=mean(number(row.get("avg_throughput_bps")) for row in group),
-                bytes_sent=mean(number(row.get("total_bytes_sent")) for row in group),
-                probes=mean(number(row.get("probe_count")) for row in group),
+                mttd=mttd,
+                rtt=rtt,
+                jitter=jitter,
+                loss=loss,
+                burst=burst,
+                throughput=throughput,
+                bytes_sent=bytes_sent,
+                probes=probes,
             )
         )
 

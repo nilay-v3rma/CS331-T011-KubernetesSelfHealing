@@ -488,6 +488,29 @@ These scenarios allow the project to test both complete failures and degraded be
 
 P5 evaluates the system using repeatable experiments. The key script is \code{hack/measure-mttd.sh}. It clears previous faults, injects a chosen scenario, records the injection timestamp, polls the \code{NetworkHealthCheck} status, and writes a CSV row when an unhealthy transition is observed.
 
+The evaluation uses the scenarios listed in Table~\ref{tab:p5-scenarios}. These scenarios were selected because each one creates a different shape in the directed reachability matrix. This is important because the classifier does not simply count failures. It looks at where the failures appear: in one row, in one column, around one node, across the whole cluster, or as partial loss.
+
+\begin{table}[h]
+\centering
+\caption{Specific scenarios used in P5}
+\label{tab:p5-scenarios}
+\scriptsize
+\begin{tabularx}{\textwidth}{@{}lYYYY@{}}
+\toprule
+\textbf{Scenario} & \textbf{Injected condition} & \textbf{Why it is included} & \textbf{Expected classifier result} & \textbf{Important measurements} \\
+\midrule
+F1 & Healthy baseline; no fault is applied. & Establishes the normal matrix before fault trials and checks that the system does not report a failure when the cluster is healthy. & \code{Healthy} & RTT, jitter, throughput, bytes per round, and probe count under normal conditions. \\
+F2 & Inbound TCP traffic to the target agent's data port \code{9376} is blocked inside the agent pod on the selected node. & Creates a column-shaped failure: other nodes cannot reach the selected node, but the selected node may still reach others. & \code{NodeIngressFailure} & MTTD, classification accuracy, failed incoming pairs, loss rate, and burst loss. \\
+F3 & Outbound TCP traffic from the target agent to data port \code{9376} is blocked inside the agent pod on the selected node. & Creates a row-shaped failure: the selected node cannot reach other nodes, but other nodes may still reach it. & \code{NodeEgressFailure} & MTTD, classification accuracy, failed outgoing pairs, loss rate, and burst loss. \\
+F4 & The Calico node pod on the selected worker is deleted, and the agent data path is blocked in both directions for that node. & Represents a node-level network isolation case where both incoming and outgoing data-plane paths fail. & \code{NodeIsolated} & MTTD, suspect node correctness, bidirectional loss, and recovery behavior after clearing. \\
+F5 & A \code{tc netem} rule adds 40 percent packet loss on the selected KIND worker. & Tests degradation rather than a complete partition. This is the main scenario for robustness metrics. & Degraded evidence in status and metrics; classification may remain \code{Healthy} if some probes still succeed. & Loss rate, burst loss, jitter, RTT change, and throughput drop. \\
+F6 & A deny-all \code{NetworkPolicy} is applied in the agent namespace. & Creates a broad policy-caused communication failure across the mesh. & \code{ClusterPartition} or \code{PolicyScopedFailure}, depending on the observed connection error pattern. & MTTD, broad failure rate, classifier result, and confidence. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+For the main P5 run, F2 through F6 are repeated because they are actual injected faults. F1 is used as the healthy starting point and cleanup baseline before each trial. This keeps each trial independent from the previous one.
+
 The full sweep is run with:
 
 \begin{lstlisting}[language=bash]

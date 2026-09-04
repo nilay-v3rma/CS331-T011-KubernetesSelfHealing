@@ -54,7 +54,7 @@
 \begin{abstract}
 Kubernetes is good at checking whether a container is running, but it does not continuously check whether one pod can reach another pod across the cluster network. This difference matters. A pod can be marked \code{Running} and \code{Ready}, while traffic from that pod to another node is silently dropped because of a CNI issue, a firewall rule, packet loss, or a broad \code{NetworkPolicy}.
 
-This project builds a Kubernetes operator that measures pod-to-pod connectivity from multiple nodes. It deploys one lightweight probe agent on each node, asks these agents to probe each other, builds a directed reachability matrix, classifies the shape of failures, exposes the result through a Kubernetes custom resource, and records measurements for evaluation. The project is divided into five implementation areas: platform setup, probe agent, operator/controller, analysis/classification, and evaluation.
+This project builds a Kubernetes operator that measures pod-to-pod connectivity from multiple nodes. It deploys one lightweight probe agent on each node, asks these agents to probe each other, builds a directed reachability matrix, classifies the shape of failures, exposes the result through a Kubernetes custom resource, and records measurements for evaluation.
 
 The main contribution is not only detecting that the network is unhealthy. The system also tries to explain where the failure is likely located, such as a node egress problem, node ingress problem, isolated node, pair-specific failure, policy-related failure, or wider cluster partition.
 \end{abstract}
@@ -654,6 +654,6 @@ This project builds a small but complete system for active pod-to-pod network he
 
 The design improves on basic health checks because it measures the actual paths between pods. It also improves on simple dashboards because the result becomes part of Kubernetes state and can be evaluated through repeatable experiments.
 
-Across its five implementation areas, the project covers platform setup, agent implementation, operator control logic, classification, safety-aware remediation planning, and evaluation. The final system can detect connectivity failures, report where they are likely located, and measure performance and robustness indicators such as latency, throughput, loss, burst loss, and jitter.
+The final system covers platform setup, agent implementation, operator control logic, classification, safety-aware remediation planning, and evaluation. It can detect connectivity failures, report where they are likely located, and measure performance and robustness indicators such as latency, throughput, loss, burst loss, and jitter.
 
 \end{document}

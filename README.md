@@ -214,7 +214,7 @@ Captured metrics include MTTD, RTT/delay, jitter, loss rate, maximum burst loss,
 | Nilay Verma | 23110219 |
 | Siddhesh Umarjee | 23110347 |
 | Patel Ridham Vijaykumar | 23110238 |
-| Eshan Jaiswal | 24110116 |
+| Eshaan Ashish Jaiswal | 24110116 |
 | Anurag Singh | 24110061 |
 
 ## Team Roles

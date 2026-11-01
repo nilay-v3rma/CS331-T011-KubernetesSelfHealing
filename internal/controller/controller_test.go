@@ -394,7 +394,7 @@ func TestProbeEndpointParsesResult(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := probeEndpoint(context.Background(), server.URL, "10.0.0.1", 2*time.Second, 5, 1024)
+	result, err := probeEndpoint(context.Background(), server.URL, "10.0.0.1", "TCP", 2*time.Second, 5, 1024)
 	if err != nil {
 		t.Fatalf("probeEndpoint returned error: %v", err)
 	}
@@ -422,7 +422,7 @@ func TestProbeEndpointPreservesDataPlaneTimeoutResult(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := probeEndpoint(context.Background(), server.URL, "10.0.0.1", probeTimeout, 1, 1024)
+	result, err := probeEndpoint(context.Background(), server.URL, "10.0.0.1", "TCP", probeTimeout, 1, 1024)
 	if err != nil {
 		t.Fatalf("probeEndpoint returned error: %v", err)
 	}
@@ -455,12 +455,14 @@ func TestPlanRemediationPrintsMatrixAndPassFail(t *testing.T) {
 		action RemediationAction
 	}{
 		{name: "healthy", class: contract.Healthy, action: NoAction},
-		{name: "pair local failure", class: contract.PairLocalFailure, action: RestartAffectedPair},
-		{name: "node ingress failure", class: contract.NodeIngressFailure, action: RestartNodeIngress},
-		{name: "node egress failure", class: contract.NodeEgressFailure, action: RestartNodeEgress},
-		{name: "node isolated", class: contract.NodeIsolated, action: RestartSuspectNode},
+		{name: "pair local failure", class: contract.PairLocalFailure, action: AlertOnly},
+		{name: "node ingress failure", class: contract.NodeIngressFailure, action: AlertOnly},
+		{name: "node egress failure", class: contract.NodeEgressFailure, action: AlertOnly},
+		{name: "node isolated", class: contract.NodeIsolated, action: AlertOnly},
 		{name: "cluster partition", class: contract.ClusterPartition, action: AlertOnly},
 		{name: "policy scoped failure", class: contract.PolicyScoped, action: AlertOnly},
+		{name: "degraded", class: contract.Classification("Degraded"), action: AlertOnly},
+		{name: "no data", class: contract.Classification("NoData"), action: NoAction},
 		{name: "unknown", class: contract.Unknown, action: NoAction},
 	}
 
@@ -566,7 +568,7 @@ func TestStubClassifierHandlesIsolatedAgentControlFailure(t *testing.T) {
 	}
 }
 
-func TestExecuteRemediationDeletesOnlySuspectAgent(t *testing.T) {
+func TestExecuteRemediationNeverDeletesAgents(t *testing.T) {
 	client := fake.NewSimpleClientset(
 		&corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -591,8 +593,8 @@ func TestExecuteRemediationDeletesOnlySuspectAgent(t *testing.T) {
 		Confidence:   1,
 		SuspectNodes: []string{"node-b"},
 	}, true, false)
-	if !plan.Execute {
-		t.Fatalf("expected non-dry-run plan to execute: %#v", plan)
+	if plan.Action != AlertOnly || plan.Execute {
+		t.Fatalf("expected non-executing alert plan, got %#v", plan)
 	}
 
 	reconciler := &Reconciler{Client: client, Namespace: "netprobe-system"}
@@ -600,17 +602,12 @@ func TestExecuteRemediationDeletesOnlySuspectAgent(t *testing.T) {
 		t.Fatalf("ExecuteRemediation returned error: %v", err)
 	}
 
-	check := func(name string, passed bool, detail string) {
-		status := "PASS"
-		if !passed {
-			status = "FAIL"
-			t.Errorf("%s: %s", name, detail)
-		}
-		t.Logf("%s: %s - %s", status, name, detail)
-	}
-
 	_, suspectErr := client.CoreV1().Pods("netprobe-system").Get(context.Background(), "agent-b", metav1.GetOptions{})
 	_, otherErr := client.CoreV1().Pods("netprobe-system").Get(context.Background(), "agent-a", metav1.GetOptions{})
-	check("suspect agent deleted", apierrors.IsNotFound(suspectErr), fmt.Sprintf("agent-b lookup error=%v", suspectErr))
-	check("non-suspect agent preserved", otherErr == nil, fmt.Sprintf("agent-a lookup error=%v", otherErr))
+	if suspectErr != nil {
+		t.Fatalf("agent-b should be preserved, lookup error=%v", suspectErr)
+	}
+	if otherErr != nil {
+		t.Fatalf("agent-a should be preserved, lookup error=%v", otherErr)
+	}
 }

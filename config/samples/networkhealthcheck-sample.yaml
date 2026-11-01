@@ -8,11 +8,9 @@ spec:
   probeType: TCP
   probeCount: 5
   probePayloadBytes: 1024
-  topology: FullMesh
-  sampleDegree: 3
   failureThreshold: 3
   successThreshold: 2
   maxConcurrentProbes: 64
   remediation:
-    enabled: true
-    dryRun: false
+    enabled: false
+    dryRun: true

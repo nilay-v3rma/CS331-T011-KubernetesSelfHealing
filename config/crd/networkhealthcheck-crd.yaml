@@ -46,21 +46,12 @@ spec:
                 type: string
                 enum:
                 - TCP
-                - HTTP
-                - ICMP
               probeCount:
                 type: integer
                 minimum: 1
               probePayloadBytes:
                 type: integer
                 minimum: 1
-              topology:
-                type: string
-                enum:
-                - FullMesh
-                - Sampled
-              sampleDegree:
-                type: integer
               failureThreshold:
                 type: integer
               successThreshold:
@@ -72,8 +63,10 @@ spec:
                 properties:
                   enabled:
                     type: boolean
+                    default: false
                   dryRun:
                     type: boolean
+                    default: true
           status:
             type: object
             properties:

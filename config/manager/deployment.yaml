@@ -25,6 +25,13 @@ spec:
         imagePullPolicy: IfNotPresent
         args:
         - "--leader-elect=true"
+        env:
+        - name: AGENT_PROBE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: netprobe-agent-secret
+              key: token
+              optional: true
         ports:
         - containerPort: 8080
           name: metrics

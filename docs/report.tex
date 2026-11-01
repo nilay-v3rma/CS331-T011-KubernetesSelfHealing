@@ -319,14 +319,12 @@ spec:
   probeType: TCP
   probeCount: 5
   probePayloadBytes: 1024
-  topology: FullMesh
-  sampleDegree: 3
   failureThreshold: 3
   successThreshold: 2
   maxConcurrentProbes: 64
   remediation:
-    enabled: true
-    dryRun: false
+    enabled: false
+    dryRun: true
 \end{lstlisting}
 
 The controller performs these steps:
@@ -628,19 +626,18 @@ First, KIND runs nodes as containers on a single host. This is excellent for rep
 
 Second, the throughput value is synthetic. The agent writes a small payload over TCP and computes bytes per second for that probe round. This is useful for comparing scenarios inside the same test setup, but it is not a replacement for a dedicated bandwidth tool such as iperf.
 
-Third, the live controller currently builds full directed probe pairs between discovered agents. The CRD contains topology fields such as \code{FullMesh}, \code{Sampled}, and \code{sampleDegree}, but sampled topology is not fully implemented in the live probe planner.
+Third, the live controller currently builds full directed probe pairs between discovered agents. Sampled planning is not implemented, so large clusters still produce an all-pairs matrix.
 
-Fourth, the hysteresis tracker exists in the analysis package, but the current live controller uses the stateless classifier entry point directly. This means repeated-round debouncing is available as code but not fully integrated into the live reconciliation path.
+Fourth, the hysteresis tracker is integrated into the live reconciliation path: a pair must fail the configured number of consecutive rounds before it is reported, and must recover for the configured number of rounds before it is marked healthy again.
 
-Fifth, remediation is intentionally limited. It can plan and perform conservative agent pod restarts for certain node-related cases, but it does not repair arbitrary CNI, policy, or underlay failures.
+Fifth, remediation is intentionally non-destructive. The controller raises an alert for detected network failures but does not restart agents, delete pods, or attempt automatic CNI, policy, or underlay repair.
 
 \section{Future Work}
 
 The most useful next improvements are:
 
 \begin{enumerate}
-  \item Integrate hysteresis directly into the live controller loop.
-  \item Fully implement sampled topology so large clusters do not require all ordered pairs every round.
+  \item Add bounded sampling so large clusters do not require all ordered pairs every round.
   \item Add real Prometheus client library registration instead of manually writing metric text.
   \item Add stronger event handling so Kubernetes Events are emitted only on meaningful transitions.
   \item Add a stronger remediation budget with cooldowns and per-node rate limits.

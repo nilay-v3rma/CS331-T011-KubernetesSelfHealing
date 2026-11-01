@@ -2,11 +2,9 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"log"
 
 	"github.com/nilay-v3rma/pod_to_pod_connectivity_operator_kubernetes/pkg/contract"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type RemediationAction string
@@ -29,6 +27,10 @@ type RemediationPlan struct {
 	Reason  string
 }
 
+// PlanRemediation deliberately selects AlertOnly for network failures.
+// Deleting a probe agent is a measurement-plane restart, not a repair of the
+// data plane, and it can erase an injected fault. Automatic network repair is
+// deferred until the evidence and rollback model in the future design exists.
 func PlanRemediation(verdict contract.Verdict, enabled, dryRun bool) RemediationPlan {
 	plan := RemediationPlan{
 		Action:  NoAction,
@@ -36,12 +38,13 @@ func PlanRemediation(verdict contract.Verdict, enabled, dryRun bool) Remediation
 		DryRun:  dryRun,
 	}
 
-	if verdict.Class == contract.Healthy {
+	class := string(verdict.Class)
+	switch class {
+	case string(contract.Healthy):
 		plan.Reason = "healthy verdict; no remediation required"
 		return plan
-	}
-	if verdict.Class == contract.Unknown {
-		plan.Reason = "unknown verdict; remediation refused"
+	case string(contract.Unknown), "NoData":
+		plan.Reason = "no conclusive data-plane evidence; remediation refused"
 		return plan
 	}
 	if verdict.Confidence < minimumConfidence {
@@ -49,74 +52,35 @@ func PlanRemediation(verdict contract.Verdict, enabled, dryRun bool) Remediation
 		return plan
 	}
 
-	switch verdict.Class {
-	case contract.PairLocalFailure:
-		plan.Action = RestartAffectedPair
-	case contract.NodeIngressFailure:
-		plan.Action = RestartNodeIngress
-	case contract.NodeEgressFailure:
-		plan.Action = RestartNodeEgress
-	case contract.NodeIsolated:
-		plan.Action = RestartSuspectNode
-	case contract.ClusterPartition, contract.PolicyScoped:
+	switch class {
+	case string(contract.PairLocalFailure),
+		string(contract.NodeIngressFailure),
+		string(contract.NodeEgressFailure),
+		string(contract.NodeIsolated),
+		string(contract.ClusterPartition),
+		string(contract.PolicyScoped),
+		"Degraded":
 		plan.Action = AlertOnly
-		plan.Reason = "requires investigation; automatic restart is unsafe"
+		plan.Reason = "network fault requires investigation; automatic remediation is disabled"
 	default:
 		plan.Reason = "unrecognized verdict; remediation refused"
 		return plan
 	}
 
-	if plan.Reason == "" {
-		plan.Reason = "dry-run remediation plan generated"
-	}
-	if plan.Action == AlertOnly {
-		return plan
-	}
 	if !enabled {
-		plan.Execute = false
-		plan.Reason = "remediation disabled; action recorded only"
-		return plan
+		plan.Reason += "; remediation disabled"
 	}
-	plan.Execute = !dryRun
+	// AlertOnly never executes a mutating action.
+	plan.Execute = false
 	return plan
 }
 
+// ExecuteRemediation is intentionally non-destructive. It records the intended
+// action and returns without touching pods or nodes.
 func (r *Reconciler) ExecuteRemediation(ctx context.Context, plan RemediationPlan) error {
 	if !plan.Execute || plan.Action == NoAction || plan.Action == AlertOnly {
 		return nil
 	}
-	if r.Client == nil {
-		return fmt.Errorf("Kubernetes client is required for remediation")
-	}
-
-	namespace := r.Namespace
-	if namespace == "" {
-		namespace = metav1.NamespaceAll
-	}
-	pods, err := r.Client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app=netprobe-agent",
-	})
-	if err != nil {
-		return err
-	}
-
-	targets := make(map[string]struct{}, len(plan.Targets))
-	for _, target := range plan.Targets {
-		targets[target] = struct{}{}
-	}
-	if len(targets) == 0 {
-		return fmt.Errorf("remediation action %s has no targets", plan.Action)
-	}
-
-	for _, pod := range pods.Items {
-		if _, ok := targets[pod.Spec.NodeName]; !ok {
-			continue
-		}
-		log.Printf("remediation: restarting agent pod %s/%s on node %s for action %s", pod.Namespace, pod.Name, pod.Spec.NodeName, plan.Action)
-		if err := r.Client.CoreV1().Pods(pod.Namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
-			return fmt.Errorf("delete agent pod %s/%s: %w", pod.Namespace, pod.Name, err)
-		}
-		log.Printf("remediation: restart requested; deleted agent pod %s/%s", pod.Namespace, pod.Name)
-	}
+	log.Printf("remediation: action %s requested for targets %v; destructive execution is disabled", plan.Action, plan.Targets)
 	return nil
 }

@@ -30,7 +30,6 @@ type NetworkHealthCheckSpec struct {
 	ProbeType           string
 	ProbeCount          int
 	ProbePayloadBytes   int
-	Topology            string
 	MaxConcurrentProbes int
 	RemediationEnabled  bool
 	RemediationDryRun   bool
@@ -44,9 +43,11 @@ type Reconciler struct {
 	DynamicClient dynamic.Interface
 	Namespace     string
 	metricsMu     sync.RWMutex
-	lastMatrix     contract.Matrix
-	lastVerdict    contract.Verdict
-	lastRound      time.Duration
+	lastMatrix    contract.Matrix
+	lastVerdict   contract.Verdict
+	lastRound     time.Duration
+	tracker       *analysis.Tracker
+	trackerConfig analysis.Config
 }
 
 var networkHealthCheckGVR = schema.GroupVersionResource{
@@ -71,6 +72,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, spec NetworkHealthCheckSpec)
 	if spec.ProbePayloadBytes <= 0 {
 		spec.ProbePayloadBytes = 1024
 	}
+	if spec.ProbeType == "" {
+		spec.ProbeType = "TCP"
+	}
+	if !strings.EqualFold(spec.ProbeType, "TCP") {
+		return contract.Verdict{}, nil, fmt.Errorf("unsupported probe type %q: only TCP is implemented", spec.ProbeType)
+	}
 
 	if endpoints, err := r.discoverAgents(ctx); err != nil {
 		return contract.Verdict{}, nil, err
@@ -92,9 +99,49 @@ func (r *Reconciler) Reconcile(ctx context.Context, spec NetworkHealthCheckSpec)
 	if spec.SuccessThreshold > 0 {
 		cfg.SuccessThreshold = spec.SuccessThreshold
 	}
-	_, verdict := analysis.Evaluate(matrix, cfg)
-	r.recordMetrics(matrix, verdict, roundDuration)
-	return verdict, matrix, nil
+
+	if r.tracker == nil ||
+		r.trackerConfig.FailureThreshold != cfg.FailureThreshold ||
+		r.trackerConfig.SuccessThreshold != cfg.SuccessThreshold {
+		r.tracker = analysis.NewTracker(cfg)
+		r.trackerConfig = cfg
+	}
+	r.tracker.Update(matrix)
+	stableMatrix := stabilizeMatrix(r.tracker, matrix)
+
+	_, verdict := analysis.Evaluate(stableMatrix, cfg)
+	r.recordMetrics(stableMatrix, verdict, roundDuration)
+	return verdict, stableMatrix, nil
+}
+
+// stabilizeMatrix applies the per-pair failure/success thresholds before
+// classification so a single probe round cannot flip the reported health.
+func stabilizeMatrix(tracker *analysis.Tracker, matrix contract.Matrix) contract.Matrix {
+	stable := make(contract.Matrix, len(matrix))
+	for key, result := range matrix {
+		state := tracker.GetState(key)
+		if state == nil {
+			stable[key] = result
+			continue
+		}
+
+		switch state.Status {
+		case analysis.PairHealthy:
+			if !result.Success {
+				result.Success = true
+				result.LossRate = 0
+				result.Error = "hysteresis: transient failure suppressed"
+			}
+		case analysis.PairDegraded:
+			if result.Success {
+				result.Success = false
+				result.LossRate = 1
+				result.Error = "hysteresis: recovery pending"
+			}
+		}
+		stable[key] = result
+	}
+	return stable
 }
 
 func (r *Reconciler) recordMetrics(matrix contract.Matrix, verdict contract.Verdict, roundDuration time.Duration) {
@@ -255,13 +302,13 @@ func (r *Reconciler) ReconcileNetworkHealthCheck(ctx context.Context, name strin
 
 func buildNetworkHealthCheckStatus(resource *unstructured.Unstructured, verdict contract.Verdict, matrix contract.Matrix) map[string]interface{} {
 	status := map[string]interface{}{
-		"observedGeneration":        resource.GetGeneration(),
-		"lastProbeTime":             time.Now().UTC().Format(time.RFC3339),
-		"verdict":                   string(verdict.Class),
-		"classification":            string(verdict.Class),
-		"classificationConfidence":  verdict.Confidence,
-		"suspectNodes":              stringSliceToInterfaces(verdict.SuspectNodes),
-		"reachability":              matrixToStatusEntries(matrix),
+		"observedGeneration":       resource.GetGeneration(),
+		"lastProbeTime":            time.Now().UTC().Format(time.RFC3339),
+		"verdict":                  string(verdict.Class),
+		"classification":           string(verdict.Class),
+		"classificationConfidence": verdict.Confidence,
+		"suspectNodes":             stringSliceToInterfaces(verdict.SuspectNodes),
+		"reachability":             matrixToStatusEntries(matrix),
 	}
 	conditionStatus := "False"
 	if verdict.Class == contract.Healthy {
@@ -319,12 +366,12 @@ func matrixToStatusEntries(matrix contract.Matrix) []interface{} {
 			"rttMinMillis":     result.RTTMinMillis,
 			"rttMaxMillis":     result.RTTMaxMillis,
 			"jitterMillis":     result.JitterMillis,
-			"burstLossMax":     result.BurstLossMax,
+			"burstLossMax":     int64(result.BurstLossMax),
 			"throughputBps":    result.ThroughputBPS,
 			"bandwidthBps":     result.BandwidthBPS,
 			"bytesSent":        result.BytesSent,
-			"probeCount":       result.ProbeCount,
-			"successfulProbes": result.Successful,
+			"probeCount":       int64(result.ProbeCount),
+			"successfulProbes": int64(result.Successful),
 			"durationMillis":   result.DurationMillis,
 			"error":            result.Error,
 			"agentError":       result.AgentError,

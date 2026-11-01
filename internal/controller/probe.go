@@ -12,14 +12,21 @@ import (
 )
 
 // [P3] Probe orchestration: call the agent HTTP endpoint and decode the contract.ProbeResult.
-func probeEndpoint(ctx context.Context, controlURL, targetIP string, timeout time.Duration, count, payloadBytes int) (contract.ProbeResult, error) {
+func probeEndpoint(ctx context.Context, controlURL, targetIP string, probeType string, timeout time.Duration, count, payloadBytes int) (contract.ProbeResult, error) {
 	if count <= 0 {
 		count = 5
 	}
 	if payloadBytes <= 0 {
 		payloadBytes = 1024
 	}
-	url := fmt.Sprintf("%s/probe?target=%s&timeout=%s&count=%d&payloadBytes=%d&type=tcp", strings.TrimRight(controlURL, "/"), targetIP, timeout.String(), count, payloadBytes)
+	if probeType == "" {
+		probeType = "tcp"
+	}
+	probeType = strings.ToLower(probeType)
+	if probeType != "tcp" {
+		return contract.ProbeResult{}, fmt.Errorf("unsupported probe type %q", probeType)
+	}
+	url := fmt.Sprintf("%s/probe?target=%s&timeout=%s&count=%d&payloadBytes=%d&type=%s", strings.TrimRight(controlURL, "/"), targetIP, timeout.String(), count, payloadBytes, probeType)
 
 	// Allow the agent's data-plane probe to reach its timeout and return a result.
 	// The control request needs a small grace period so a probe timeout is not

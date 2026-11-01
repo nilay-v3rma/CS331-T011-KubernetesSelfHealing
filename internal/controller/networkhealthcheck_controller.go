@@ -64,6 +64,17 @@ func (c *NetworkHealthCheckController) ReconcileAll(ctx context.Context) error {
 			continue
 		}
 
+		lastProbeTime, _, err := unstructured.NestedString(resource.Object, "status", "lastProbeTime")
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("%s: invalid status.lastProbeTime: %w", resource.GetName(), err)
+			}
+			continue
+		}
+		if !shouldRun(lastProbeTime, spec.Interval) {
+			continue
+		}
+
 		_, _, err = c.Reconciler.ReconcileNetworkHealthCheck(ctx, resource.GetName(), spec)
 		if err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("%s: %w", resource.GetName(), err)
@@ -106,10 +117,6 @@ func networkHealthCheckSpecFromResource(resource *unstructured.Unstructured) (Ne
 	spec.ProbeType, _, err = unstructured.NestedString(resource.Object, "spec", "probeType")
 	if err != nil {
 		return spec, fmt.Errorf("invalid spec.probeType: %w", err)
-	}
-	spec.Topology, _, err = unstructured.NestedString(resource.Object, "spec", "topology")
-	if err != nil {
-		return spec, fmt.Errorf("invalid spec.topology: %w", err)
 	}
 
 	probeCount, found, err := unstructured.NestedInt64(resource.Object, "spec", "probeCount")
@@ -162,4 +169,18 @@ func networkHealthCheckSpecFromResource(resource *unstructured.Unstructured) (Ne
 	}
 
 	return spec, nil
+}
+
+// shouldRun reports whether a new probe round is due. An absent or malformed
+// lastProbeTime is treated as "never probed" so the controller recovers instead
+// of getting stuck.
+func shouldRun(lastProbeTime string, interval time.Duration) bool {
+	if interval <= 0 || lastProbeTime == "" {
+		return true
+	}
+	last, err := time.Parse(time.RFC3339, lastProbeTime)
+	if err != nil {
+		return true
+	}
+	return time.Since(last) >= interval
 }

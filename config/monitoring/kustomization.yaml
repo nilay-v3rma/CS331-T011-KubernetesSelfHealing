@@ -1,0 +1,13 @@
+# Minimal Prometheus + Grafana stack plus the provisioned mesh dashboard.
+# servicemonitor.yaml is applied separately because it needs the Prometheus Operator CRDs.
+resources:
+- prometheus-stack.yaml
+
+configMapGenerator:
+- name: grafana-dashboard-mesh
+  namespace: monitoring
+  files:
+  - grafana-dashboard.json
+
+generatorOptions:
+  disableNameSuffixHash: true

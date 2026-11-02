@@ -84,11 +84,32 @@ spec:
                 type: array
                 items:
                   type: string
+              summary:
+                type: string
               reachability:
                 type: array
                 items:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+              reachabilityTruncated:
+                type: boolean
+              reachabilityTotal:
+                type: integer
+              reachabilitySummary:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  healthy:
+                    type: integer
+                  degraded:
+                    type: integer
+                  failed:
+                    type: integer
+              degradedPairs:
+                type: array
+                items:
+                  type: string
               conditions:
                 type: array
                 items:

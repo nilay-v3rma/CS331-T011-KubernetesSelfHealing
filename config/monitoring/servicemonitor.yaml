@@ -17,6 +17,7 @@ spec:
       - netprobe-system
   selector:
     matchLabels:
+      app.kubernetes.io/name: selfheal-network-operator
       app.kubernetes.io/component: manager
   endpoints:
     - port: metrics

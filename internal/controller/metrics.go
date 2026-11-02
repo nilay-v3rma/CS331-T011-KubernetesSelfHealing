@@ -3,7 +3,6 @@ package controller
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/nilay-v3rma/pod_to_pod_connectivity_operator_kubernetes/pkg/contract"
@@ -25,6 +24,9 @@ import (
 //   - netprobe_classification{classification}  (info gauge, value 1)
 //   - netprobe_classification_confidence{classification}
 //   - netprobe_reachability_pairs{state}  (states: healthy, degraded, failed, nodata)
+//
+// healthy/degraded/failed count pairs by pairState; nodata is 1 when there is no
+// matrix at all (no agents, or no round has run yet) and 0 otherwise.
 func (r *Reconciler) WriteMetrics(w io.Writer) {
 	r.metricsMu.RLock()
 	defer r.metricsMu.RUnlock()
@@ -50,14 +52,8 @@ func (r *Reconciler) WriteMetrics(w io.Writer) {
 	fmt.Fprintln(w, "# HELP netprobe_pair_probes_sent Directed pair probes attempted during the latest round")
 	fmt.Fprintln(w, "# TYPE netprobe_pair_probes_sent gauge")
 
-	keys := make([]string, 0, len(r.lastMatrix))
-	for key := range r.lastMatrix {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	// Counters for reachability_pairs.
-	var healthy, degraded, failed, nodata int
+	keys := sortedMatrixKeys(r.lastMatrix)
+	pairCounts := map[string]int{pairStateHealthy: 0, pairStateDegraded: 0, pairStateFailed: 0}
 
 	for _, key := range keys {
 		src, dst := splitPairKey(key)
@@ -75,18 +71,11 @@ func (r *Reconciler) WriteMetrics(w io.Writer) {
 		fmt.Fprintf(w, "netprobe_pair_throughput_bytes_per_second{%s} %.6f\n", labels, result.ThroughputBPS)
 		fmt.Fprintf(w, "netprobe_pair_bytes_sent{%s} %d\n", labels, result.BytesSent)
 		fmt.Fprintf(w, "netprobe_pair_probes_sent{%s} %d\n", labels, result.ProbeCount)
-
-		// Classify pair state for reachability_pairs metric.
-		switch {
-		case result.Success && result.LossRate < 0.05:
-			healthy++
-		case result.Success && result.LossRate >= 0.05:
-			degraded++
-		case !result.Success && !result.AgentError:
-			failed++
-		default:
-			nodata++
-		}
+		pairCounts[pairState(result)]++
+	}
+	nodata := 0
+	if len(keys) == 0 {
+		nodata = 1
 	}
 
 	fmt.Fprintln(w, "# HELP netprobe_round_duration_seconds Latest probe round wall-clock duration")
@@ -114,9 +103,9 @@ func (r *Reconciler) WriteMetrics(w io.Writer) {
 	// netprobe_reachability_pairs: per-state pair counts.
 	fmt.Fprintln(w, "# HELP netprobe_reachability_pairs Number of directed pairs in each reachability state")
 	fmt.Fprintln(w, "# TYPE netprobe_reachability_pairs gauge")
-	fmt.Fprintf(w, "netprobe_reachability_pairs{state=\"healthy\"} %d\n", healthy)
-	fmt.Fprintf(w, "netprobe_reachability_pairs{state=\"degraded\"} %d\n", degraded)
-	fmt.Fprintf(w, "netprobe_reachability_pairs{state=\"failed\"} %d\n", failed)
+	for _, state := range []string{pairStateHealthy, pairStateDegraded, pairStateFailed} {
+		fmt.Fprintf(w, "netprobe_reachability_pairs{state=\"%s\"} %d\n", state, pairCounts[state])
+	}
 	fmt.Fprintf(w, "netprobe_reachability_pairs{state=\"nodata\"} %d\n", nodata)
 }
 

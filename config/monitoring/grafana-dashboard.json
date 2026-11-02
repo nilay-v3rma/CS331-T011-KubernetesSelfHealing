@@ -17,19 +17,26 @@
       "targets": [
         {
           "expr": "netprobe_mesh_health",
-          "legendFormat": "{{verdict}}"
+          "legendFormat": "{{verdict}}",
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "1": { "text": "Active", "color": "green" } } }
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "Not healthy", "color": "red" },
+                "1": { "text": "Healthy", "color": "green" }
+              }
+            }
           ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
             ]
           }
         }
@@ -37,15 +44,22 @@
     },
     {
       "title": "Classification",
+      "description": "Info gauge: the series value is always 1; the classification is the label.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "netprobe_classification == 1",
-          "legendFormat": "{{classification}}"
+          "expr": "netprobe_classification",
+          "legendFormat": "{{classification}}",
+          "instant": true
         }
-      ]
+      ],
+      "options": {
+        "textMode": "name",
+        "colorMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
     },
     {
       "title": "Classification Confidence",

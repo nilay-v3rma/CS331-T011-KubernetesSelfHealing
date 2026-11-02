@@ -90,8 +90,12 @@ deploy-sample:  ## Apply sample NetworkHealthCheck CR
 
 .PHONY: deploy-monitoring
 deploy-monitoring:  ## Deploy Prometheus + Grafana monitoring stack
-	kubectl apply -f config/monitoring/prometheus-stack.yaml
-	kubectl apply -f config/monitoring/servicemonitor.yaml
+	kubectl apply -k config/monitoring
+	@if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then \
+		kubectl apply -f config/monitoring/servicemonitor.yaml; \
+	else \
+		echo "ServiceMonitor CRD not installed; skipping servicemonitor.yaml (prometheus-stack.yaml scrapes via kubernetes_sd)"; \
+	fi
 
 # ============================================================================
 # Fault injection targets

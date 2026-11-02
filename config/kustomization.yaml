@@ -5,5 +5,7 @@ resources:
 - rbac/role.yaml
 - rbac/role-binding.yaml
 - manager/deployment.yaml
+- agent/secret.yaml
 - agent/daemonset.yaml
 - agent/service.yaml
+- manager/service.yaml

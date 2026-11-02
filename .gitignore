@@ -60,3 +60,8 @@ charts/*.tgz
 !.vscode/extensions.json
 *.code-workspace
 .history/
+
+# Conversation & temporary work summaries
+conversation_summary.md
+P4_WORK_SUMMARY.md
+WORK_SUMMARY_P4.md

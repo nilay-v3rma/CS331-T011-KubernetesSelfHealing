@@ -48,18 +48,31 @@
       ]
     },
     {
-      "title": "Probe Round Duration",
-      "type": "timeseries",
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 0 },
+      "title": "Classification Confidence",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, rate(netprobe_round_duration_seconds_bucket[5m]))",
-          "legendFormat": "p99 {{topology_mode}}"
-        },
+          "expr": "netprobe_classification_confidence",
+          "legendFormat": "{{classification}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "title": "Probe Round Duration",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
         {
-          "expr": "histogram_quantile(0.50, rate(netprobe_round_duration_seconds_bucket[5m]))",
-          "legendFormat": "p50 {{topology_mode}}"
+          "expr": "netprobe_round_duration_seconds",
+          "legendFormat": "round duration"
         }
       ],
       "fieldConfig": {
@@ -89,8 +102,6 @@
             "renameByName": {
               "src_node": "Source",
               "dst_node": "Target",
-              "src_pod": "Source Pod",
-              "dst_pod": "Target Pod",
               "Value": "Reachable"
             }
           }
@@ -130,70 +141,50 @@
       }
     },
     {
-      "title": "Pair RTT (p50)",
+      "title": "Pair Reachability States",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, rate(netprobe_pair_rtt_seconds_bucket[5m]))",
+          "expr": "netprobe_reachability_pairs",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "title": "Pair RTT (ms)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "netprobe_pair_rtt_seconds * 1000",
           "legendFormat": "{{src_node}} → {{dst_node}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "ms"
         }
       }
     },
     {
-      "title": "Probe Errors (rate/s)",
+      "title": "Pair Loss Rate",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 12 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "datasource": "Prometheus",
       "targets": [
         {
-          "expr": "rate(netprobe_probe_errors_total[5m])",
-          "legendFormat": "{{src_node}}→{{dst_node}} ({{reason}})"
-        }
-      ]
-    },
-    {
-      "title": "Probes Sent (rate/s)",
-      "type": "timeseries",
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 14 },
-      "datasource": "Prometheus",
-      "targets": [
-        {
-          "expr": "rate(netprobe_probes_sent_total[5m])",
-          "legendFormat": "{{topology_mode}}"
-        }
-      ]
-    },
-    {
-      "title": "Suspect Nodes",
-      "type": "table",
-      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 18 },
-      "datasource": "Prometheus",
-      "targets": [
-        {
-          "expr": "netprobe_classification == 1",
-          "format": "table",
-          "instant": true
+          "expr": "netprobe_pair_loss_rate",
+          "legendFormat": "{{src_node}} → {{dst_node}}"
         }
       ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true, "Value": true },
-            "renameByName": {
-              "classification": "Classification",
-              "suspect_node": "Suspect Node"
-            }
-          }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
         }
-      ]
+      }
     }
   ],
   "schemaVersion": 39,
@@ -204,5 +195,5 @@
   "timezone": "browser",
   "title": "Self-Heal Network Operator — Mesh Health",
   "uid": "selfheal-mesh-health",
-  "version": 1
+  "version": 2
 }

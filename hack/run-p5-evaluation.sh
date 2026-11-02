@@ -2,7 +2,7 @@
 set -euo pipefail
 
 TRIALS="${TRIALS:-10}"
-SCENARIOS="${SCENARIOS:-F2 F3 F4 F5 F6}"
+SCENARIOS="${SCENARIOS:-F1 F2 F3 F4 F5 F6}"
 
 echo "Running P5 evaluation: scenarios=(${SCENARIOS}) trials=${TRIALS}"
 echo "Results will be appended under docs/results/"

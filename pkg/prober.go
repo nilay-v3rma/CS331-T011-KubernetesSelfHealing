@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/url"
@@ -74,25 +75,34 @@ func ParseProbeOptions(query url.Values) (ProbeOptions, error) {
 	}, nil
 }
 
+// probeTCP performs a bidirectional TCP probe (V5): dials the target, writes a
+// payload, then reads a 1-byte ack from the server.  Success is only declared
+// when the ack is received, giving a true round-trip measurement.
 func probeTCP(target string, timeout time.Duration, payloadBytes int) (time.Duration, int, error) {
 	start := time.Now()
 
 	conn, err := net.DialTimeout("tcp", target, timeout)
-
 	if err != nil {
 		return 0, 0, err
 	}
+	defer conn.Close()
 
+	// Single deadline covers both the write and the ack read.
 	_ = conn.SetDeadline(time.Now().Add(timeout))
+
 	written := 0
 	if payloadBytes > 0 {
 		payload := make([]byte, payloadBytes)
 		written, err = conn.Write(payload)
+		if err != nil {
+			return 0, written, err
+		}
 	}
-	conn.Close()
 
-	if err != nil {
-		return 0, written, err
+	// Read exactly 1-byte ack from the server.
+	ack := make([]byte, 1)
+	if _, err = io.ReadFull(conn, ack); err != nil {
+		return 0, written, fmt.Errorf("ack read failed: %w", err)
 	}
 
 	return time.Since(start), written, nil

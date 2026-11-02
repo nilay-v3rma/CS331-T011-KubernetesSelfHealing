@@ -21,6 +21,10 @@ jobs:
           go-version: '1.22'
           cache: true
 
+      - name: Shell syntax check
+        run: |
+          for f in hack/*.sh; do bash -n "$f" && echo "OK: $f" || exit 1; done
+
       - name: Go vet
         run: go vet ./...
 

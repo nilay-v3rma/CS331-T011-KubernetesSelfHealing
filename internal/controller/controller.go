@@ -3,8 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"io"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,7 +11,6 @@ import (
 	"github.com/nilay-v3rma/pod_to_pod_connectivity_operator_kubernetes/pkg/contract"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -152,68 +149,6 @@ func (r *Reconciler) recordMetrics(matrix contract.Matrix, verdict contract.Verd
 	r.lastRound = roundDuration
 }
 
-func (r *Reconciler) WriteMetrics(w io.Writer) {
-	r.metricsMu.RLock()
-	defer r.metricsMu.RUnlock()
-
-	fmt.Fprintln(w, "# HELP netprobe_manager_up Manager is running")
-	fmt.Fprintln(w, "# TYPE netprobe_manager_up gauge")
-	fmt.Fprintln(w, "netprobe_manager_up 1")
-	fmt.Fprintln(w, "# HELP netprobe_pair_reachable Directed pair reachability, 1 for reachable and 0 for failed")
-	fmt.Fprintln(w, "# TYPE netprobe_pair_reachable gauge")
-	fmt.Fprintln(w, "# HELP netprobe_pair_rtt_seconds Directed pair average probe RTT")
-	fmt.Fprintln(w, "# TYPE netprobe_pair_rtt_seconds gauge")
-	fmt.Fprintln(w, "# HELP netprobe_pair_jitter_seconds Directed pair RTT jitter")
-	fmt.Fprintln(w, "# TYPE netprobe_pair_jitter_seconds gauge")
-	fmt.Fprintln(w, "# HELP netprobe_pair_loss_rate Directed pair probe loss rate")
-	fmt.Fprintln(w, "# TYPE netprobe_pair_loss_rate gauge")
-	fmt.Fprintln(w, "# HELP netprobe_pair_loss_burst Directed pair maximum consecutive probe failures")
-	fmt.Fprintln(w, "# TYPE netprobe_pair_loss_burst gauge")
-	fmt.Fprintln(w, "# HELP netprobe_pair_throughput_bytes_per_second Directed pair synthetic payload throughput")
-	fmt.Fprintln(w, "# TYPE netprobe_pair_throughput_bytes_per_second gauge")
-	fmt.Fprintln(w, "# HELP netprobe_pair_bytes_sent Directed pair bytes sent during the latest round")
-	fmt.Fprintln(w, "# TYPE netprobe_pair_bytes_sent gauge")
-	fmt.Fprintln(w, "# HELP netprobe_pair_probes_sent Directed pair probes attempted during the latest round")
-	fmt.Fprintln(w, "# TYPE netprobe_pair_probes_sent gauge")
-
-	keys := make([]string, 0, len(r.lastMatrix))
-	for key := range r.lastMatrix {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		src, dst := splitPairKey(key)
-		labels := fmt.Sprintf(`src_node="%s",dst_node="%s"`, promLabel(src), promLabel(dst))
-		result := r.lastMatrix[key]
-		reachable := 0
-		if result.Success {
-			reachable = 1
-		}
-		fmt.Fprintf(w, "netprobe_pair_reachable{%s} %d\n", labels, reachable)
-		fmt.Fprintf(w, "netprobe_pair_rtt_seconds{%s} %.9f\n", labels, result.RTTMillis/1000.0)
-		fmt.Fprintf(w, "netprobe_pair_jitter_seconds{%s} %.9f\n", labels, result.JitterMillis/1000.0)
-		fmt.Fprintf(w, "netprobe_pair_loss_rate{%s} %.6f\n", labels, result.LossRate)
-		fmt.Fprintf(w, "netprobe_pair_loss_burst{%s} %d\n", labels, result.BurstLossMax)
-		fmt.Fprintf(w, "netprobe_pair_throughput_bytes_per_second{%s} %.6f\n", labels, result.ThroughputBPS)
-		fmt.Fprintf(w, "netprobe_pair_bytes_sent{%s} %d\n", labels, result.BytesSent)
-		fmt.Fprintf(w, "netprobe_pair_probes_sent{%s} %d\n", labels, result.ProbeCount)
-	}
-
-	fmt.Fprintln(w, "# HELP netprobe_round_duration_seconds Latest probe round wall-clock duration")
-	fmt.Fprintln(w, "# TYPE netprobe_round_duration_seconds gauge")
-	fmt.Fprintf(w, "netprobe_round_duration_seconds %.9f\n", r.lastRound.Seconds())
-	fmt.Fprintln(w, "# HELP netprobe_mesh_health Mesh health, 1 when latest verdict is Healthy")
-	fmt.Fprintln(w, "# TYPE netprobe_mesh_health gauge")
-	meshHealthy := 0
-	if r.lastVerdict.Class == contract.Healthy {
-		meshHealthy = 1
-	}
-	fmt.Fprintf(w, "netprobe_mesh_health{verdict=\"%s\"} %d\n", promLabel(string(r.lastVerdict.Class)), meshHealthy)
-	fmt.Fprintln(w, "# HELP netprobe_classification Latest classification confidence")
-	fmt.Fprintln(w, "# TYPE netprobe_classification gauge")
-	fmt.Fprintf(w, "netprobe_classification{classification=\"%s\"} %.6f\n", promLabel(string(r.lastVerdict.Class)), r.lastVerdict.Confidence)
-}
-
 func buildAgentEndpointsFromPods(pods []corev1.Pod) []contract.Endpoint {
 	endpoints := make([]contract.Endpoint, 0, len(pods))
 	for _, pod := range pods {
@@ -298,110 +233,4 @@ func (r *Reconciler) ReconcileNetworkHealthCheck(ctx context.Context, name strin
 	}
 
 	return verdict, matrix, nil
-}
-
-func buildNetworkHealthCheckStatus(resource *unstructured.Unstructured, verdict contract.Verdict, matrix contract.Matrix) map[string]interface{} {
-	status := map[string]interface{}{
-		"observedGeneration":       resource.GetGeneration(),
-		"lastProbeTime":            time.Now().UTC().Format(time.RFC3339),
-		"verdict":                  string(verdict.Class),
-		"classification":           string(verdict.Class),
-		"classificationConfidence": verdict.Confidence,
-		"suspectNodes":             stringSliceToInterfaces(verdict.SuspectNodes),
-		"reachability":             matrixToStatusEntries(matrix),
-	}
-	conditionStatus := "False"
-	if verdict.Class == contract.Healthy {
-		conditionStatus = "True"
-	}
-	transitionTime := time.Now().UTC().Format(time.RFC3339)
-	if previousTransitionTime := previousConditionTransitionTime(resource, "Healthy", conditionStatus, string(verdict.Class)); previousTransitionTime != "" {
-		transitionTime = previousTransitionTime
-	}
-	status["conditions"] = []interface{}{map[string]interface{}{
-		"type":               "Healthy",
-		"status":             conditionStatus,
-		"lastTransitionTime": transitionTime,
-		"reason":             string(verdict.Class),
-		"message":            verdict.Summary,
-	}}
-	return status
-}
-
-func previousConditionTransitionTime(resource *unstructured.Unstructured, conditionType, conditionStatus, reason string) string {
-	conditions, found, err := unstructured.NestedSlice(resource.Object, "status", "conditions")
-	if err != nil || !found {
-		return ""
-	}
-	for _, item := range conditions {
-		condition, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if condition["type"] == conditionType && condition["status"] == conditionStatus && condition["reason"] == reason {
-			if previous, ok := condition["lastTransitionTime"].(string); ok {
-				return previous
-			}
-		}
-	}
-	return ""
-}
-
-func matrixToStatusEntries(matrix contract.Matrix) []interface{} {
-	keys := make([]string, 0, len(matrix))
-	for key := range matrix {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	entries := make([]interface{}, 0, len(keys))
-	for _, key := range keys {
-		parts := strings.SplitN(key, "->", 2)
-		result := matrix[key]
-		entry := map[string]interface{}{
-			"key":              key,
-			"success":          result.Success,
-			"lossRate":         result.LossRate,
-			"rttMillis":        result.RTTMillis,
-			"rttMinMillis":     result.RTTMinMillis,
-			"rttMaxMillis":     result.RTTMaxMillis,
-			"jitterMillis":     result.JitterMillis,
-			"burstLossMax":     int64(result.BurstLossMax),
-			"throughputBps":    result.ThroughputBPS,
-			"bandwidthBps":     result.BandwidthBPS,
-			"bytesSent":        result.BytesSent,
-			"probeCount":       int64(result.ProbeCount),
-			"successfulProbes": int64(result.Successful),
-			"durationMillis":   result.DurationMillis,
-			"error":            result.Error,
-			"agentError":       result.AgentError,
-		}
-		if len(parts) == 2 {
-			entry["source"] = parts[0]
-			entry["destination"] = parts[1]
-		}
-		entries = append(entries, entry)
-	}
-	return entries
-}
-
-func stringSliceToInterfaces(values []string) []interface{} {
-	result := make([]interface{}, len(values))
-	for i, value := range values {
-		result[i] = value
-	}
-	return result
-}
-
-func splitPairKey(key string) (string, string) {
-	parts := strings.SplitN(key, "->", 2)
-	if len(parts) != 2 {
-		return key, ""
-	}
-	return parts[0], parts[1]
-}
-
-func promLabel(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	return strings.ReplaceAll(value, `"`, `\"`)
 }

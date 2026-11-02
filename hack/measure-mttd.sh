@@ -8,7 +8,7 @@ NHC_NAME="${NHC_NAME:-cluster-mesh}"
 POLL_TIMEOUT_SECONDS="${POLL_TIMEOUT_SECONDS:-120}"
 
 if [[ -z "$SCENARIO" ]]; then
-  echo "Usage: $0 <F2|F3|F4|F5|F6> [trials]"
+  echo "Usage: $0 <F1|F2|F3|F4|F5|F6> [trials]"
   exit 1
 fi
 
@@ -21,6 +21,7 @@ fi
 
 TRUE_CLASS="Unknown"
 case "$SCENARIO" in
+  F1) TRUE_CLASS="Healthy" ;;
   F2) TRUE_CLASS="NodeIngressFailure" ;;
   F3) TRUE_CLASS="NodeEgressFailure" ;;
   F4) TRUE_CLASS="NodeIsolated" ;;
@@ -83,6 +84,46 @@ print(f"{detected_ms},{classification},{confidence},{avg_rtt:.6f},{avg_jitter:.6
 PY
 }
 
+# For F1: check whether the Healthy condition is currently True (healthy)
+extract_f1_false_positive() {
+  local inject_ts="$1"
+  local status_file="$2"
+  python3 - "$inject_ts" "$status_file" <<'PY'
+import json
+import sys
+from datetime import datetime
+
+inject_ms = int(sys.argv[1])
+status_file = sys.argv[2]
+try:
+    with open(status_file) as handle:
+        data = json.load(handle)
+except Exception:
+    print("None")
+    raise SystemExit
+
+status = data.get("status", {})
+classification = status.get("classification", "Unknown")
+confidence = status.get("classificationConfidence", 0.0)
+
+# A false positive occurs when Healthy condition transitions to False
+# (operator incorrectly flags a healthy cluster as unhealthy)
+for condition in status.get("conditions", []):
+    if condition.get("type") != "Healthy" or condition.get("status") != "False":
+        continue
+    raw = condition.get("lastTransitionTime")
+    if not raw:
+        continue
+    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    candidate_ms = int(dt.timestamp() * 1000)
+    if candidate_ms >= inject_ms:
+        print(f"{candidate_ms},{classification},{confidence}")
+        raise SystemExit
+
+print("None")
+PY
+}
+
 now_ms() {
   python3 - <<'PY'
 import time
@@ -101,27 +142,54 @@ for (( trial=1; trial<=TRIALS; trial++ )); do
   echo "Injecting fault at ${INJECT_TS}"
   ./hack/inject-fault.sh "$SCENARIO" >/dev/null
 
-  DETECTION=""
-  for (( second=1; second<=POLL_TIMEOUT_SECONDS; second++ )); do
-    STATUS_JSON="$(kubectl get nhc "$NHC_NAME" -o json 2>/dev/null || echo '{}')"
-    STATUS_FILE="$(mktemp)"
-    printf '%s' "$STATUS_JSON" > "$STATUS_FILE"
-    DETECTION="$(extract_detection "$INJECT_TS" "$STATUS_FILE")"
-    rm -f "$STATUS_FILE"
-    if [[ "$DETECTION" != "None" ]]; then
-      break
-    fi
-    sleep 1
-  done
+  if [[ "$SCENARIO" == "F1" ]]; then
+    # F1: healthy control — watch for a false positive (Healthy condition → False)
+    FP_DETECTION=""
+    for (( second=1; second<=POLL_TIMEOUT_SECONDS; second++ )); do
+      STATUS_JSON="$(kubectl get nhc "$NHC_NAME" -o json 2>/dev/null || echo '{}')"
+      STATUS_FILE="$(mktemp)"
+      printf '%s' "$STATUS_JSON" > "$STATUS_FILE"
+      FP_DETECTION="$(extract_f1_false_positive "$INJECT_TS" "$STATUS_FILE")"
+      rm -f "$STATUS_FILE"
+      if [[ "$FP_DETECTION" != "None" ]]; then
+        break
+      fi
+      sleep 1
+    done
 
-  if [[ "$DETECTION" != "None" ]]; then
-    IFS=',' read -r DETECT_TS PRED_CLASS CONFIDENCE AVG_RTT AVG_JITTER AVG_LOSS MAX_BURST AVG_THROUGHPUT TOTAL_BYTES PROBE_COUNT <<< "$DETECTION"
-    MTTD=$(( DETECT_TS - INJECT_TS ))
-    echo "Detected in ${MTTD}ms. Class: ${PRED_CLASS} (confidence ${CONFIDENCE})"
-    echo "${SCENARIO},${trial},${INJECT_TS},${DETECT_TS},${MTTD},${PRED_CLASS},${TRUE_CLASS},${CONFIDENCE},${AVG_RTT},${AVG_JITTER},${AVG_LOSS},${MAX_BURST},${AVG_THROUGHPUT},${TOTAL_BYTES},${PROBE_COUNT}" >> "$RESULTS_FILE"
+    if [[ "$FP_DETECTION" != "None" ]]; then
+      IFS=',' read -r DETECT_TS PRED_CLASS CONFIDENCE <<< "$FP_DETECTION"
+      MTTD=$(( DETECT_TS - INJECT_TS ))
+      echo "FALSE POSITIVE detected in ${MTTD}ms. Predicted: ${PRED_CLASS} (confidence ${CONFIDENCE})"
+      echo "${SCENARIO},${trial},${INJECT_TS},${DETECT_TS},${MTTD},${PRED_CLASS},${TRUE_CLASS},${CONFIDENCE},,,,,,,," >> "$RESULTS_FILE"
+    else
+      echo "No false positive within ${POLL_TIMEOUT_SECONDS}s (true negative — good)"
+      # Record as true negative: predicted_class=Healthy (correctly not flagged)
+      echo "${SCENARIO},${trial},${INJECT_TS},,,,${TRUE_CLASS},,,,,,,,," >> "$RESULTS_FILE"
+    fi
   else
-    echo "Failed to detect within ${POLL_TIMEOUT_SECONDS}s"
-    echo "${SCENARIO},${trial},${INJECT_TS},,TIMEOUT,,${TRUE_CLASS},,,,,,,," >> "$RESULTS_FILE"
+    DETECTION=""
+    for (( second=1; second<=POLL_TIMEOUT_SECONDS; second++ )); do
+      STATUS_JSON="$(kubectl get nhc "$NHC_NAME" -o json 2>/dev/null || echo '{}')"
+      STATUS_FILE="$(mktemp)"
+      printf '%s' "$STATUS_JSON" > "$STATUS_FILE"
+      DETECTION="$(extract_detection "$INJECT_TS" "$STATUS_FILE")"
+      rm -f "$STATUS_FILE"
+      if [[ "$DETECTION" != "None" ]]; then
+        break
+      fi
+      sleep 1
+    done
+
+    if [[ "$DETECTION" != "None" ]]; then
+      IFS=',' read -r DETECT_TS PRED_CLASS CONFIDENCE AVG_RTT AVG_JITTER AVG_LOSS MAX_BURST AVG_THROUGHPUT TOTAL_BYTES PROBE_COUNT <<< "$DETECTION"
+      MTTD=$(( DETECT_TS - INJECT_TS ))
+      echo "Detected in ${MTTD}ms. Class: ${PRED_CLASS} (confidence ${CONFIDENCE})"
+      echo "${SCENARIO},${trial},${INJECT_TS},${DETECT_TS},${MTTD},${PRED_CLASS},${TRUE_CLASS},${CONFIDENCE},${AVG_RTT},${AVG_JITTER},${AVG_LOSS},${MAX_BURST},${AVG_THROUGHPUT},${TOTAL_BYTES},${PROBE_COUNT}" >> "$RESULTS_FILE"
+    else
+      echo "Failed to detect within ${POLL_TIMEOUT_SECONDS}s"
+      echo "${SCENARIO},${trial},${INJECT_TS},,TIMEOUT,,${TRUE_CLASS},,,,,,,," >> "$RESULTS_FILE"
+    fi
   fi
 
   echo "Clearing fault"

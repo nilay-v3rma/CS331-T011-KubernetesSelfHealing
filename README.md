@@ -10,18 +10,18 @@ A Kubernetes operator that maintains a continuously refreshed east-west reachabi
                    ┌──────────────────────────────────────┐
                    │  NetworkHealthCheck (CRD, cluster)   │
                    │  spec: interval, selectors, probe,   │
-                   │        thresholds, topology mode     │
+                   │        thresholds                    │
                    │  status: matrix, conditions, verdict │
                    └───────────────┬──────────────────────┘
                                    │ watch / reconcile
                    ┌───────────────▼──────────────────────┐
                    │  Operator (Deployment, 1 replica)    │
                    │  - discovers agent pods              │
-                   │  - builds probe plan (mesh/sampled)  │
+                   │  - builds probe matrix               │
                    │  - fans out probe RPCs (bounded)     │
                    │  - aggregates + hysteresis           │
                    │  - classifies blast radius           │
-                   │  - writes status, Events, metrics    │
+                   │  - writes status + metrics           │
                    └───────┬───────────┬──────────┬───────┘
                            │ HTTP      │          │
               ┌────────────▼──┐  ┌─────▼───────┐  ┌▼─────────────┐
@@ -70,19 +70,9 @@ kubectl get nhc cluster-mesh -o yaml
 make clear-fault SCENARIO=F3
 ```
 
-## 5-Minute Demo
-
-```bash
-# Run the interactive demo script
-make demo
-```
-
-This walks through: healthy baseline → fault injection → detection → clearance → recovery.
-
 ## Project Structure
 
 ```
-├── api/v1alpha1/                    # CRD types (P3)
 ├── cmd/
 │   ├── manager/main.go              # Operator entry point
 │   └── agent/main.go                # Agent entry point
@@ -96,6 +86,7 @@ This walks through: healthy baseline → fault injection → detection → clear
 │   ├── monitoring/                  # Prometheus + Grafana
 │   └── kustomization.yaml           # Root kustomization
 ├── contracts/fixtures/              # Test matrices (11 scenarios)
+├── docs/results/                    # P5 evaluation outputs
 ├── hack/
 │   ├── kind-cluster.yaml            # KIND cluster config
 │   ├── setup-cluster.sh             # Cluster creation + Calico
@@ -103,11 +94,13 @@ This walks through: healthy baseline → fault injection → detection → clear
 │   ├── inject-fault.sh              # Fault scenarios F1–F6
 │   ├── deny-all.yaml                # NetworkPolicy for F6
 │   ├── measure-mttd.sh              # MTTD measurement
-│   └── demo.sh                      # 5-minute demo
-├── internal/controller/             # Controller logic (P3)
+│   └── demo.sh                      # Demo script
+├── internal/controller/             # Controller logic
 ├── pkg/
 │   ├── contract/types.go            # Frozen contract types
-│   └── analysis/                    # Classifier + hysteresis (P4)
+│   ├── analysis/                    # Classifier + hysteresis
+│   ├── prober.go                    # Agent prober code
+│   └── server.go                    # Agent server code
 ├── Dockerfile                       # Manager image
 ├── Dockerfile.agent                 # Agent image
 ├── Makefile                         # Build orchestration
@@ -139,7 +132,6 @@ This walks through: healthy baseline → fault injection → detection → clear
 | `make test` | Run `go vet` + `go test` |
 | `make inject-fault SCENARIO=F3` | Inject a fault scenario |
 | `make clear-fault SCENARIO=F3` | Clear a fault scenario |
-| `make demo` | Run 5-minute interactive demo |
 | `make status` | Show cluster and operator status |
 | `make help` | Show all available targets |
 
@@ -157,18 +149,17 @@ Access:
 
 ### Exported Metrics
 
-| Metric | Type | Labels |
-|:-------|:-----|:-------|
-| `netprobe_pair_reachable` | Gauge (0/1) | `src_node`, `dst_node`, `src_pod`, `dst_pod` |
-| `netprobe_pair_rtt_seconds` | Histogram | `src_node`, `dst_node` |
-| `netprobe_pair_jitter_seconds` | Gauge | `src_node`, `dst_node` |
-| `netprobe_pair_loss_burst` | Gauge | `src_node`, `dst_node` |
-| `netprobe_pair_throughput_bytes_per_second` | Gauge | `src_node`, `dst_node` |
-| `netprobe_probe_errors_total` | Counter | `src_node`, `dst_node`, `reason` |
-| `netprobe_round_duration_seconds` | Histogram | `topology_mode` |
-| `netprobe_mesh_health` | Gauge | `verdict` |
-| `netprobe_classification` | Gauge (0/1) | `classification`, `suspect_node` |
-| `netprobe_probes_sent_total` | Counter | `topology_mode` |
+| Metric | Type | Labels | Description |
+|:-------|:-----|:-------|:------------|
+| `netprobe_manager_up` | Gauge | — | Manager is running (always 1) |
+| `netprobe_pair_reachable` | Gauge (0/1) | `src_node`, `dst_node` | Whether a directed pair is reachable |
+| `netprobe_pair_rtt_seconds` | Gauge | `src_node`, `dst_node` | Average RTT for the pair |
+| `netprobe_pair_loss_rate` | Gauge | `src_node`, `dst_node` | Measured loss rate for the pair |
+| `netprobe_round_duration_seconds` | Gauge | — | Duration of last probe round |
+| `netprobe_mesh_health` | Gauge (0/1) | — | 1 if verdict is Healthy, 0 otherwise |
+| `netprobe_classification` | Gauge (always 1) | `classification` | Current classification label |
+| `netprobe_classification_confidence` | Gauge | `classification` | Confidence score of current classification |
+| `netprobe_reachability_pairs` | Gauge | `state` (healthy/degraded/failed/nodata) | Count of pairs in each state |
 
 ## P5 Evaluation
 
@@ -192,15 +183,41 @@ Captured metrics include MTTD, RTT/delay, jitter, loss rate, maximum burst loss,
 
 | Category | Choice |
 |:---------|:-------|
-| Cluster | KIND (1 control-plane + 3 workers) |
-| CNI | Calico v3.28.0 |
-| Language | Go 1.22+ |
-| Scaffolding | kubebuilder v4 + controller-runtime |
-| Metrics | prometheus/client_golang |
-| Concurrency | golang.org/x/sync/errgroup |
-| Testing | envtest + Ginkgo/Gomega |
-| Fault injection | docker exec + iptables/tc netem |
+| Cluster | KIND (1 control-plane + 2 workers) |
+| CNI | Calico v3.28 |
+| Language | Go 1.22 |
+| Kubernetes client | k8s.io/client-go (dynamic + typed) |
+| Metrics | Hand-written Prometheus text format |
+| Concurrency | Go goroutines + semaphore |
+| Testing | Go standard `testing` package + `k8s.io/client-go/kubernetes/fake` |
+| Fault injection | `docker exec` + iptables/tc netem |
 | Monitoring | Prometheus + Grafana |
+
+## What Is Intentionally Not Implemented
+
+The following capabilities are designed in `lookforward.md` but deliberately outside this week's scope.
+For each item the prerequisite evidence, safety model, or correctness property was not yet met.
+
+- **`NetworkIntent` CRD / intent compiler** — PathIntent DSL for desired-state specification
+- **eBPF / Hubble / Retina integration** — kernel-level flow data fusion
+- **`v1beta1` API + conversion webhook** — extended condition types and versioned CRD schema
+- **Automatic policy repair** — blocking on the safe-rollback model in `lookforward.md`
+- **Traffic shifting, node drain** — automatic remediation of any kind; current remediation is `AlertOnly`
+- **HTTP / ICMP probe types** — advertised but never implemented; removed from CRD enum to avoid lying
+- **Multi-cluster or 200-node scale** — not tested or claimed
+- **ML / classifier model** — purely rule-based deterministic classifier used instead
+
+See `lookforward.md` for the full future design.
+
+## Security
+
+The agent `/probe` endpoint is protected:
+
+- **Bearer token** (`PROBE_TOKEN` env var on agent, `AGENT_PROBE_TOKEN` on manager): requests without the correct token receive `401`.
+- **CIDR allowlist** (`PROBE_ALLOWED_CIDRS`, default `192.168.0.0/16,10.0.0.0/8,172.16.0.0/12`): probes to loopback, link-local (`169.254.0.0/16`), multicast, or outside the allowlist receive `403`.
+- **No hostname targets**: only IP literals are accepted; DNS-based bypass is not possible.
+- **Probe success = bidirectional exchange**: the data listener writes a 1-byte acknowledgement; the prober reads it before reporting success.
+- `/healthz` and `/metrics` do not require the probe token.
 
 ## Team Details
 
@@ -221,11 +238,11 @@ Captured metrics include MTTD, RTT/delay, jitter, loss rate, maximum burst loss,
 
 | Person | Artifact | Directory |
 |:-------|:---------|:----------|
-| P1 (Platform) | Cluster, images, CI, manifests | `hack/`, `config/`, `Dockerfile*`, `Makefile` |
-| P2 (Agent) | Probe agent binary | `cmd/agent/`, `pkg/agent/` |
-| P3 (Operator) | CRD + controller | `api/`, `cmd/manager/`, `internal/controller/` |
-| P4 (Analysis) | Classifier library | `pkg/analysis/` |
-| P5 (Evaluation) | Experiments + report | `experiments/`, `test/`, `docs/` |
+| Ridham | Integration, CRD, remediation | `cmd/manager/`, `internal/controller/`, `config/` |
+| Anurag | Analysis, classifier, hysteresis | `pkg/analysis/`, `pkg/contract/`, `contracts/fixtures/` |
+| Eeshan | Probe agent, security | `pkg/prober.go`, `pkg/server.go`, `cmd/agent/`, `config/agent/` |
+| Nilay | Status, metrics, docs | `internal/controller/status.go`, `internal/controller/metrics.go`, `config/monitoring/`, `README.md` |
+| Siddhesh | Evaluation, fault harness, CI | `hack/`, `docs/results/`, `.github/workflows/` |
 
 ## License
 

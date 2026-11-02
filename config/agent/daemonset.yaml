@@ -33,6 +33,13 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
+        - name: PROBE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: netprobe-agent-secret
+              key: token
+        - name: PROBE_ALLOWED_CIDRS
+          value: "192.168.0.0/16,10.0.0.0/8,172.16.0.0/12"
         livenessProbe:
           httpGet:
             path: /healthz
@@ -46,7 +53,5 @@ spec:
             memory: 32Mi
         securityContext:
           capabilities:
-            add:
-            - NET_ADMIN
             drop:
             - NET_RAW

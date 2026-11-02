@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -39,7 +40,13 @@ func probeEndpoint(ctx context.Context, controlURL, targetIP string, probeType s
 		return contract.ProbeResult{}, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	// V6: attach Bearer token when AGENT_PROBE_TOKEN is set.
+	if token := os.Getenv("AGENT_PROBE_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	httpClient := &http.Client{Timeout: timeout*time.Duration(count) + 2*time.Second}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return contract.ProbeResult{}, err
 	}

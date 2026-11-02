@@ -150,3 +150,96 @@ func TestHysteresisReset(t *testing.T) {
 		t.Fatal("expected nil state after reset")
 	}
 }
+
+const stabilizePair = "worker1->worker2"
+
+var (
+	stabilizeFailed  = contract.Matrix{stabilizePair: {Success: false, LossRate: 1, Error: "dial tcp: i/o timeout"}}
+	stabilizeHealthy = contract.Matrix{stabilizePair: {Success: true, LossRate: 0, RTTMillis: 0.5}}
+)
+
+// round feeds one matrix through the tracker and returns the stabilized view.
+func round(tracker *Tracker, m contract.Matrix) contract.Matrix {
+	tracker.Update(m)
+	return tracker.Stabilize(m)
+}
+
+func newStabilizeTracker() *Tracker {
+	return NewTracker(Config{FailureThreshold: 3, SuccessThreshold: 2})
+}
+
+func TestHysteresisStabilizeSingleFailureSuppressed(t *testing.T) {
+	tracker := newStabilizeTracker()
+	input := contract.Matrix{stabilizePair: stabilizeFailed[stabilizePair]}
+
+	got := round(tracker, input)[stabilizePair]
+	if !got.Success || got.LossRate != 0 || got.Error != "hysteresis: transient failure suppressed" {
+		t.Errorf("1 failure: got %+v, want suppressed success", got)
+	}
+	if input[stabilizePair].Success || input[stabilizePair].Error != "dial tcp: i/o timeout" {
+		t.Errorf("Stabilize mutated caller's matrix: %+v", input[stabilizePair])
+	}
+}
+
+func TestHysteresisStabilizeThreeFailuresSurface(t *testing.T) {
+	tracker := newStabilizeTracker()
+	for i := 1; i <= 2; i++ {
+		if got := round(tracker, stabilizeFailed)[stabilizePair]; !got.Success {
+			t.Fatalf("failure %d should be suppressed, got %+v", i, got)
+		}
+	}
+	got := round(tracker, stabilizeFailed)[stabilizePair]
+	if got.Success || got.Error != "dial tcp: i/o timeout" {
+		t.Errorf("3 failures: got %+v, want real failure", got)
+	}
+}
+
+func TestHysteresisStabilizeOneSuccessStillDegraded(t *testing.T) {
+	tracker := newStabilizeTracker()
+	for i := 0; i < 3; i++ {
+		round(tracker, stabilizeFailed)
+	}
+	got := round(tracker, stabilizeHealthy)[stabilizePair]
+	if got.Success || got.LossRate != 1 || got.Error != "hysteresis: recovery pending" {
+		t.Errorf("1 success after degraded: got %+v, want recovery pending", got)
+	}
+}
+
+func TestHysteresisStabilizeTwoSuccessesRecover(t *testing.T) {
+	tracker := newStabilizeTracker()
+	for i := 0; i < 3; i++ {
+		round(tracker, stabilizeFailed)
+	}
+	round(tracker, stabilizeHealthy)
+	got := round(tracker, stabilizeHealthy)[stabilizePair]
+	if got != stabilizeHealthy[stabilizePair] {
+		t.Errorf("2 successes: got %+v, want real result %+v", got, stabilizeHealthy[stabilizePair])
+	}
+	if tracker.GetState(stabilizePair).Status != PairHealthy {
+		t.Error("expected tracker state Healthy after 2 successes")
+	}
+}
+
+func TestHysteresisStabilizeAgentErrorPassthrough(t *testing.T) {
+	tracker := newStabilizeTracker()
+	m := contract.Matrix{stabilizePair: {Success: false, LossRate: 1, AgentError: true, Error: "control channel down"}}
+	got := round(tracker, m)[stabilizePair]
+	if got != m[stabilizePair] {
+		t.Errorf("agent error rewritten: got %+v", got)
+	}
+}
+
+func TestHysteresisStabilizeThenEvaluate(t *testing.T) {
+	tracker := newStabilizeTracker()
+	m := loadMatrix(t, "pair-local.json")
+	cfg := DefaultConfig()
+
+	for i := 1; i <= 2; i++ {
+		if _, v := Evaluate(round(tracker, m), cfg); v.Class != contract.Healthy {
+			t.Fatalf("round %d: got %q, want Healthy (transient suppressed)", i, v.Class)
+		}
+	}
+	if _, v := Evaluate(round(tracker, m), cfg); v.Class != contract.PairLocalFailure {
+		t.Errorf("round 3: got %q, want PairLocalFailure", v.Class)
+	}
+}

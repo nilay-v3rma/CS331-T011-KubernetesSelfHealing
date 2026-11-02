@@ -5,18 +5,18 @@ package contract
 
 // ProbeResult is the response from the agent's /probe endpoint. Frozen.
 type ProbeResult struct {
-	Success       bool    `json:"success"`
-	LossRate      float64 `json:"lossRate"`
-	RTTMillis     float64 `json:"rttMillis"`
-	RTTMinMillis  float64 `json:"rttMinMillis,omitempty"`
-	RTTMaxMillis  float64 `json:"rttMaxMillis,omitempty"`
-	JitterMillis  float64 `json:"jitterMillis,omitempty"`
-	BurstLossMax  int     `json:"burstLossMax,omitempty"`
-	ThroughputBPS float64 `json:"throughputBps,omitempty"`
-	BandwidthBPS  float64 `json:"bandwidthBps,omitempty"`
-	BytesSent     int64   `json:"bytesSent,omitempty"`
-	ProbeCount    int     `json:"probeCount,omitempty"`
-	Successful    int     `json:"successfulProbes,omitempty"`
+	Success        bool    `json:"success"`
+	LossRate       float64 `json:"lossRate"`
+	RTTMillis      float64 `json:"rttMillis"`
+	RTTMinMillis   float64 `json:"rttMinMillis,omitempty"`
+	RTTMaxMillis   float64 `json:"rttMaxMillis,omitempty"`
+	JitterMillis   float64 `json:"jitterMillis,omitempty"`
+	BurstLossMax   int     `json:"burstLossMax,omitempty"`
+	ThroughputBPS  float64 `json:"throughputBps,omitempty"`
+	BandwidthBPS   float64 `json:"bandwidthBps,omitempty"`
+	BytesSent      int64   `json:"bytesSent,omitempty"`
+	ProbeCount     int     `json:"probeCount,omitempty"`
+	Successful     int     `json:"successfulProbes,omitempty"`
 	DurationMillis float64 `json:"durationMillis,omitempty"`
 	Error          string  `json:"error,omitempty"`
 	AgentError     bool    `json:"agentError"` // true = control channel failed, NOT a data plane fault
@@ -44,6 +44,12 @@ const (
 	ClusterPartition   Classification = "ClusterPartition"
 	PolicyScoped       Classification = "PolicyScopedFailure"
 	Unknown            Classification = "Unknown"
+	// NoData means there was no evidence to classify (e.g. an empty matrix).
+	// It is distinct from Healthy: absence of failures is not proof of health.
+	NoData Classification = "NoData"
+	// Degraded means every pair is reachable but at least one pair's measured
+	// loss rate is at or above the configured degraded-loss threshold.
+	Degraded Classification = "Degraded"
 )
 
 // Verdict is the output of the analysis library's Evaluate function.

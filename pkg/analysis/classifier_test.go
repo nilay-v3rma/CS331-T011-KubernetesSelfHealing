@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/nilay-v3rma/pod_to_pod_connectivity_operator_kubernetes/pkg/contract"
@@ -28,9 +29,9 @@ func TestClassifyFixtures(t *testing.T) {
 	cfg := DefaultConfig()
 
 	tests := []struct {
-		name     string
-		file     string
-		wantClass contract.Classification
+		name        string
+		file        string
+		wantClass   contract.Classification
 		wantSuspect []string // nil means don't check
 	}{
 		{
@@ -83,9 +84,21 @@ func TestClassifyFixtures(t *testing.T) {
 			wantClass: contract.Unknown,
 		},
 		{
-			name:      "degraded-partial-loss",
-			file:      "degraded-partial-loss.json",
-			wantClass: contract.Healthy,
+			name:        "degraded-partial-loss",
+			file:        "degraded-partial-loss.json",
+			wantClass:   contract.Degraded,
+			wantSuspect: []string{"worker1", "worker2", "worker3"},
+		},
+		{
+			name:      "empty",
+			file:      "empty.json",
+			wantClass: contract.NoData,
+		},
+		{
+			name:        "loss-40",
+			file:        "loss-40.json",
+			wantClass:   contract.Degraded,
+			wantSuspect: []string{"worker1", "worker2", "worker3"},
 		},
 	}
 
@@ -110,7 +123,7 @@ func TestClassifyFixtures(t *testing.T) {
 				}
 			}
 
-			if verdict.Class != contract.Unknown && verdict.Class != contract.Healthy {
+			if verdict.Class != contract.Unknown && verdict.Class != contract.Healthy && verdict.Class != contract.NoData {
 				if verdict.Confidence < cfg.ConfidenceFloor {
 					t.Errorf("non-unknown verdict %q has confidence %.2f below floor %.2f", verdict.Class, verdict.Confidence, cfg.ConfidenceFloor)
 				}
@@ -123,11 +136,20 @@ func TestClassifyFixtures(t *testing.T) {
 
 func TestClassifyEmptyMatrix(t *testing.T) {
 	_, verdict := Evaluate(contract.Matrix{}, DefaultConfig())
-	if verdict.Class != contract.Healthy {
-		t.Errorf("empty matrix: got %q, want Healthy", verdict.Class)
+	if verdict.Class != contract.NoData {
+		t.Errorf("empty matrix: got %q, want NoData", verdict.Class)
 	}
-	if verdict.Confidence != 1.0 {
-		t.Errorf("empty matrix confidence: got %.2f, want 1.0", verdict.Confidence)
+	if verdict.Confidence != 0.0 {
+		t.Errorf("empty matrix confidence: got %.2f, want 0.0", verdict.Confidence)
+	}
+	if verdict.Summary != "insufficient evidence: empty matrix" {
+		t.Errorf("empty matrix summary: got %q", verdict.Summary)
+	}
+
+	// A nil matrix carries no evidence either.
+	_, verdict = Evaluate(nil, DefaultConfig())
+	if verdict.Class != contract.NoData {
+		t.Errorf("nil matrix: got %q, want NoData", verdict.Class)
 	}
 }
 
@@ -159,15 +181,74 @@ func TestConfidenceFloor(t *testing.T) {
 	}
 }
 
-func TestDegradedPairsInSummary(t *testing.T) {
+func TestDegradedPartialLoss(t *testing.T) {
 	m := loadMatrix(t, "degraded-partial-loss.json")
 	_, verdict := Evaluate(m, DefaultConfig())
-	if verdict.Class != contract.Healthy {
-		t.Errorf("degraded-partial-loss: got %q, want Healthy", verdict.Class)
+	if verdict.Class != contract.Degraded {
+		t.Fatalf("degraded-partial-loss: got %q, want Degraded", verdict.Class)
 	}
-	// Summary should mention degradation
-	if len(verdict.Summary) == 0 {
-		t.Error("expected non-empty summary for degraded matrix")
+	if verdict.Confidence != 1.0 {
+		t.Errorf("degraded confidence: got %.2f, want 1.0", verdict.Confidence)
+	}
+	for _, want := range []string{"worker1->worker2", "worker3->worker2", "threshold"} {
+		if !strings.Contains(verdict.Summary, want) {
+			t.Errorf("summary %q missing %q", verdict.Summary, want)
+		}
 	}
 	t.Logf("summary: %s", verdict.Summary)
+}
+
+func TestDegradedThresholdBoundary(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		loss float64
+		want contract.Classification
+	}{
+		{"at threshold", DefaultConfig(), 0.05, contract.Degraded},
+		{"below threshold", DefaultConfig(), 0.04, contract.Healthy},
+		{"zero-value config uses default, at", Config{}, 0.05, contract.Degraded},
+		{"zero-value config uses default, below", Config{}, 0.04, contract.Healthy},
+		{"zero loss is healthy", Config{}, 0.0, contract.Healthy},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := contract.Matrix{
+				"a->b": {Success: true, LossRate: tc.loss},
+				"b->a": {Success: true, LossRate: 0},
+			}
+			_, verdict := Evaluate(m, tc.cfg)
+			if verdict.Class != tc.want {
+				t.Errorf("loss %.2f: got %q, want %q (summary: %s)", tc.loss, verdict.Class, tc.want, verdict.Summary)
+			}
+		})
+	}
+}
+
+func TestDegradedHardFailureDominates(t *testing.T) {
+	m := loadMatrix(t, "pair-local.json")
+	for key, result := range m {
+		if result.Success {
+			result.LossRate = 0.4
+			m[key] = result
+			break
+		}
+	}
+	_, verdict := Evaluate(m, DefaultConfig())
+	if verdict.Class != contract.PairLocalFailure {
+		t.Errorf("hard failure plus loss: got %q, want PairLocalFailure", verdict.Class)
+	}
+}
+
+func TestDegradedConfigurable(t *testing.T) {
+	m := loadMatrix(t, "loss-40.json")
+	cfg := DefaultConfig()
+	cfg.DegradedLossThreshold = 0.5
+	_, verdict := Evaluate(m, cfg)
+	if verdict.Class != contract.Healthy {
+		t.Errorf("loss-40 with 50%% threshold: got %q, want Healthy", verdict.Class)
+	}
+	if !strings.Contains(verdict.Summary, "below") {
+		t.Errorf("sub-threshold loss should still be reported, summary: %q", verdict.Summary)
+	}
 }

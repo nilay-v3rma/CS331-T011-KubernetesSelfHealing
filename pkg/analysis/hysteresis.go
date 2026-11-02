@@ -8,7 +8,7 @@ import (
 type PairStatus int
 
 const (
-	PairHealthy  PairStatus = iota
+	PairHealthy PairStatus = iota
 	PairDegraded
 )
 
@@ -74,6 +74,46 @@ func (t *Tracker) Update(m contract.Matrix) {
 			}
 		}
 	}
+}
+
+// Stabilize applies the tracker's current per-pair state to a probe round so a
+// single noisy round cannot flip the reported health. It only reads state:
+// call Update(m) first, then Stabilize(m). It returns a new matrix and never
+// mutates the caller's map.
+//
+//   - PairHealthy + failed result: the failure is suppressed until it has
+//     repeated FailureThreshold times (Update then moves the pair to Degraded).
+//   - PairDegraded + successful result: the failure is held until
+//     SuccessThreshold consecutive successes (Update then recovers the pair).
+//   - Otherwise, and for untracked pairs or agent errors, the real result
+//     passes through. Agent errors are never rewritten so the classifier's
+//     control-channel guardrail always sees them.
+func (t *Tracker) Stabilize(m contract.Matrix) contract.Matrix {
+	stable := make(contract.Matrix, len(m))
+	for key, result := range m {
+		state := t.pairs[key]
+		if state == nil || result.AgentError {
+			stable[key] = result
+			continue
+		}
+
+		switch state.Status {
+		case PairHealthy:
+			if !result.Success {
+				result.Success = true
+				result.LossRate = 0
+				result.Error = "hysteresis: transient failure suppressed"
+			}
+		case PairDegraded:
+			if result.Success {
+				result.Success = false
+				result.LossRate = 1
+				result.Error = "hysteresis: recovery pending"
+			}
+		}
+		stable[key] = result
+	}
+	return stable
 }
 
 // DegradedPairs returns the set of pair keys currently in Degraded state.

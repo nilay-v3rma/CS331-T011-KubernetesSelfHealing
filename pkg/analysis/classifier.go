@@ -12,9 +12,9 @@ import (
 func classify(m contract.Matrix, cfg Config) contract.Verdict {
 	if len(m) == 0 {
 		return contract.Verdict{
-			Class:      contract.Healthy,
-			Confidence: 1.0,
-			Summary:    "empty matrix; no probes to evaluate",
+			Class:      contract.NoData,
+			Confidence: 0.0,
+			Summary:    "insufficient evidence: empty matrix",
 		}
 	}
 
@@ -47,25 +47,51 @@ func classify(m contract.Matrix, cfg Config) contract.Verdict {
 	}
 	var failed []failedPair
 	var degradedSummaries []string
+	var minorLossSummaries []string
+	degradedNodes := make(map[string]struct{})
+	lossThreshold := degradedLossThreshold(cfg)
 
 	for key, result := range m {
 		parts := strings.SplitN(key, "->", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		if !result.Success {
+		switch {
+		case !result.Success:
 			failed = append(failed, failedPair{key: key, src: parts[0], dst: parts[1]})
-		} else if result.LossRate > 0 {
-			degradedSummaries = append(degradedSummaries, fmt.Sprintf("%s (%.0f%% loss, %.1fms RTT)", key, result.LossRate*100, result.RTTMillis))
+		case isDegraded(result, lossThreshold):
+			degradedSummaries = append(degradedSummaries, describeLoss(key, result))
+			degradedNodes[parts[0]] = struct{}{}
+			degradedNodes[parts[1]] = struct{}{}
+		case result.LossRate > 0:
+			minorLossSummaries = append(minorLossSummaries, describeLoss(key, result))
 		}
 	}
 
-	// --- 4. No hard failures ---
+	// --- 4. No hard failures: Degraded if measured loss crosses the threshold ---
+	// Hard failures (below) always dominate partial loss.
 	if len(failed) == 0 {
-		summary := "all probes succeeded"
 		if len(degradedSummaries) > 0 {
 			sort.Strings(degradedSummaries)
-			summary = fmt.Sprintf("all probes succeeded; degraded pairs detected: %s", strings.Join(degradedSummaries, ", "))
+			var suspects []string
+			for node := range degradedNodes {
+				suspects = append(suspects, node)
+			}
+			sort.Strings(suspects)
+			// Confidence 1.0: the verdict is a direct, deterministic observation
+			// (measured loss >= threshold), not a probabilistic inference.
+			return contract.Verdict{
+				Class:        contract.Degraded,
+				Confidence:   1.0,
+				SuspectNodes: suspects,
+				Summary: fmt.Sprintf("all pairs reachable but measured loss >= %.0f%% threshold on %d of %d pairs: %s",
+					lossThreshold*100, len(degradedSummaries), len(m), strings.Join(degradedSummaries, ", ")),
+			}
+		}
+		summary := "all probes succeeded"
+		if len(minorLossSummaries) > 0 {
+			sort.Strings(minorLossSummaries)
+			summary = fmt.Sprintf("all probes succeeded; loss below %.0f%% threshold on: %s", lossThreshold*100, strings.Join(minorLossSummaries, ", "))
 		}
 		return contract.Verdict{
 			Class:      contract.Healthy,
@@ -239,4 +265,25 @@ func classify(m contract.Matrix, cfg Config) contract.Verdict {
 		Confidence: float64(totalFailed) / float64(totalPairs),
 		Summary:    fmt.Sprintf("%d of %d probes failed; no hypothesis exceeds confidence floor %.2f", totalFailed, totalPairs, confidenceFloor),
 	}
+}
+
+// degradedLossThreshold returns the configured loss threshold, falling back to
+// the policy default when unset so a zero-value Config does not treat every
+// reachable pair (LossRate >= 0) as degraded.
+func degradedLossThreshold(cfg Config) float64 {
+	if cfg.DegradedLossThreshold <= 0 {
+		return defaultDegradedLossThreshold
+	}
+	return cfg.DegradedLossThreshold
+}
+
+// isDegraded reports whether a reachable pair has measured loss at or above
+// the threshold. Success means at least one probe got through; LossRate is the
+// quality signal, so a failed pair is a hard failure, never "degraded".
+func isDegraded(result contract.ProbeResult, threshold float64) bool {
+	return result.Success && result.LossRate >= threshold
+}
+
+func describeLoss(key string, result contract.ProbeResult) string {
+	return fmt.Sprintf("%s (%.0f%% loss, %.1fms RTT)", key, result.LossRate*100, result.RTTMillis)
 }

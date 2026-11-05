@@ -84,7 +84,7 @@ func TestDashboardAndReadmeReferenceOnlyEmittedMetrics(t *testing.T) {
 	if err := json.Unmarshal(dashboard, &parsed); err != nil {
 		t.Fatalf("dashboard JSON does not parse: %v", err)
 	}
-	readme, err := os.ReadFile("../../README.md")
+	readme, err := os.ReadFile("../../../README.md")
 	if err != nil {
 		t.Fatalf("read README: %v", err)
 	}

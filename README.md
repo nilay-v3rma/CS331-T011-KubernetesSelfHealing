@@ -49,7 +49,12 @@ The manager never sends data plane traffic itself; it only orchestrates. For eac
 
 ## Quick Start
 
+All source code is in `code/`. Run every `make` target and script from there; paths in the rest of this README are relative to `code/`.
+
 ```bash
+# 0. Enter the source directory
+cd code
+
 # 1. Create the 4-node KIND cluster (1 control-plane + 3 workers) with Calico CNI
 make cluster-up
 
@@ -192,7 +197,7 @@ The Grafana dashboard (`config/monitoring/grafana-dashboard.json`) queries only 
 
 ## P5 Evaluation
 
-P5 measures detection latency from the live `NetworkHealthCheck` status:
+P5 measures detection latency from the live `NetworkHealthCheck` status (run from `code/`):
 
 ```bash
 # One scenario
@@ -203,58 +208,61 @@ TRIALS=10 ./hack/run-p5-evaluation.sh
 ```
 
 Outputs:
-- Raw CSV: `docs/results/mttd-results.csv`
-- Summary table and confusion matrix: `docs/results/p5-summary.md`
+- Raw CSV: `code/docs/results/mttd-results.csv`
+- Summary table and confusion matrix: `code/docs/results/p5-summary.md`
 
 Captured metrics include MTTD, RTT, jitter, loss rate, maximum burst loss, synthetic throughput, bytes per round, and probe count. The scripts measure detection (MTTD) only, not recovery time.
 
 ## Project Structure
 
 ```
-├── cmd/
-│   ├── manager/main.go              # Manager entry point: poll loop, /healthz, /metrics
-│   └── agent/main.go                # Agent entry point
-├── config/
-│   ├── namespace.yaml               # netprobe-system namespace
-│   ├── crd/                         # NetworkHealthCheck CRD (v1alpha1)
-│   ├── rbac/                        # ClusterRole, binding, ServiceAccount
-│   ├── manager/                     # Manager Deployment + metrics Service
-│   ├── agent/                       # Agent DaemonSet, headless Service, probe-token Secret
-│   ├── samples/                     # Example NetworkHealthCheck (cluster-mesh)
-│   ├── monitoring/                  # Prometheus, Grafana, dashboard, ServiceMonitors
-│   └── kustomization.yaml           # Root kustomization
-├── contracts/fixtures/              # Classifier test matrices (13 scenarios)
-├── docs/
-│   ├── report.tex / report.pdf      # Project report
-│   └── results/                     # P5 evaluation outputs
-├── hack/
-│   ├── kind-cluster.yaml            # KIND cluster config
-│   ├── setup-cluster.sh             # Cluster creation + Calico
-│   ├── reset-cluster.sh             # Cluster teardown
-│   ├── inject-fault.sh              # Fault scenarios F1–F6
-│   ├── deny-all.yaml                # NetworkPolicy for F6
-│   ├── measure-mttd.sh              # MTTD measurement
-│   ├── run-p5-evaluation.sh         # Scenario sweep
-│   ├── summarize-results.py         # CSV → p5-summary.md
-│   ├── test-self-healing.sh         # End-to-end smoke test
-│   └── demo.sh                      # Demo script
-├── internal/controller/
-│   ├── networkhealthcheck_controller.go  # Poll loop, spec parsing, interval gating
-│   ├── controller.go                # Reconcile: discover → probe → hysteresis → classify → status
-│   ├── prober.go / probe.go         # Concurrent probe round + agent HTTP client
-│   ├── status.go                    # Bounded status builder
-│   ├── metrics.go                   # Prometheus text exposition
-│   ├── remediation.go               # Alert-only remediation planner
-│   └── classifier_stub.go           # Early P3 classifier, used only by tests
-├── pkg/
-│   ├── contract/types.go            # Shared contract types
-│   ├── analysis/                    # Classifier + hysteresis tracker
-│   ├── prober.go                    # Agent TCP prober
-│   └── server.go                    # Agent HTTP server, auth, target allowlist
-├── Dockerfile                       # Manager image
-├── Dockerfile.agent                 # Agent image
-├── Makefile                         # Build orchestration
-└── go.mod
+├── README.md
+├── code/                                 # All source code (run make/scripts from here)
+│   ├── cmd/
+│   │   ├── manager/main.go               # Manager entry point: poll loop, /healthz, /metrics
+│   │   └── agent/main.go                 # Agent entry point
+│   ├── config/
+│   │   ├── namespace.yaml                # netprobe-system namespace
+│   │   ├── crd/                          # NetworkHealthCheck CRD (v1alpha1)
+│   │   ├── rbac/                         # ClusterRole, binding, ServiceAccount
+│   │   ├── manager/                      # Manager Deployment + metrics Service
+│   │   ├── agent/                        # Agent DaemonSet, headless Service, probe-token Secret
+│   │   ├── samples/                      # Example NetworkHealthCheck (cluster-mesh)
+│   │   ├── monitoring/                   # Prometheus, Grafana, dashboard, ServiceMonitors
+│   │   └── kustomization.yaml            # Root kustomization
+│   ├── contracts/fixtures/               # Classifier test matrices (13 scenarios)
+│   ├── docs/results/                     # P5 evaluation outputs (raw CSV + summary)
+│   ├── hack/
+│   │   ├── kind-cluster.yaml             # KIND cluster config
+│   │   ├── setup-cluster.sh              # Cluster creation + Calico
+│   │   ├── reset-cluster.sh              # Cluster teardown
+│   │   ├── inject-fault.sh               # Fault scenarios F1–F6
+│   │   ├── deny-all.yaml                 # NetworkPolicy for F6
+│   │   ├── measure-mttd.sh               # MTTD measurement
+│   │   ├── run-p5-evaluation.sh          # Scenario sweep
+│   │   ├── summarize-results.py          # CSV → p5-summary.md
+│   │   ├── test-self-healing.sh          # End-to-end smoke test
+│   │   └── demo.sh                       # Demo script
+│   ├── internal/controller/
+│   │   ├── networkhealthcheck_controller.go  # Poll loop, spec parsing, interval gating
+│   │   ├── controller.go                 # Reconcile: discover → probe → hysteresis → classify → status
+│   │   ├── prober.go / probe.go          # Concurrent probe round + agent HTTP client
+│   │   ├── status.go                     # Bounded status builder
+│   │   ├── metrics.go                    # Prometheus text exposition
+│   │   ├── remediation.go                # Alert-only remediation planner
+│   │   └── classifier_stub.go            # Early P3 classifier, used only by tests
+│   ├── pkg/
+│   │   ├── contract/types.go             # Shared contract types
+│   │   ├── analysis/                     # Classifier + hysteresis tracker
+│   │   ├── prober.go                     # Agent TCP prober
+│   │   └── server.go                     # Agent HTTP server, auth, target allowlist
+│   ├── Dockerfile                        # Manager image
+│   ├── Dockerfile.agent                  # Agent image
+│   ├── Makefile                          # Build orchestration
+│   └── go.mod
+├── report/                               # Final report (.docx and PDF)
+├── ppt/                                  # Presentation slides
+└── ai/                                   # AI prompts and conversations
 ```
 
 ## Make Targets

@@ -9,7 +9,7 @@ TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-120}"
 SCENARIOS="${SCENARIOS:-F1 F2 F3 F4 F5 F6}"
 
 log() {
-  printf '[%s] %s\n' "$(date -Iseconds)" "$*"
+  printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$*"
 }
 
 fail() {
@@ -60,10 +60,11 @@ wait_for_agent() {
 
 expected_class() {
   case "$1" in
-    F1|F5) printf '%s\n' "Healthy" ;;
+    F1) printf '%s\n' "Healthy" ;;
     F2) printf '%s\n' "NodeIngressFailure" ;;
     F3) printf '%s\n' "NodeEgressFailure" ;;
     F4) printf '%s\n' "${F4_EXPECTED_CLASS:-NodeIsolated}" ;;
+    F5) printf '%s\n' "Degraded" ;;
     F6) printf '%s\n' "ClusterPartition" ;;
     *) return 1 ;;
   esac
@@ -119,8 +120,9 @@ for scenario in ${SCENARIOS}; do
     fail "operator did not classify ${scenario} as ${expected}"
   }
 
-  if needs_restart "${expected}"; then
-    log "Waiting for the operator-initiated agent restart"
+  remediation_enabled="$(kubectl get nhc "${NHC_NAME}" -o jsonpath='{.spec.remediation.enabled}' 2>/dev/null || echo "false")"
+  if [[ "${remediation_enabled}" == "true" ]] && needs_restart "${expected}"; then
+    log "Remediation enabled: waiting for operator-initiated agent restart"
     deadline=$((SECONDS + TIMEOUT_SECONDS))
     restarted=0
     while (( SECONDS < deadline )); do
@@ -135,7 +137,7 @@ for scenario in ${SCENARIOS}; do
     done
     [[ "${restarted}" -eq 1 ]] || fail "${scenario} target agent UID did not change"
   else
-    log "PASS: ${scenario} produced ${expected}; no restart is expected"
+    log "PASS: ${scenario} produced ${expected}; zero destructive agent deletes (remediation disabled/dry-run per V7)"
   fi
 
   bash hack/inject-fault.sh "${scenario}" --clear

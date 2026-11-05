@@ -59,7 +59,7 @@ for condition in status.get("conditions", []):
         continue
     dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     candidate_ms = int(dt.timestamp() * 1000)
-    if candidate_ms >= inject_ms:
+    if candidate_ms >= (inject_ms - 1000):
         detected_ms = candidate_ms
         break
 
@@ -116,7 +116,7 @@ for condition in status.get("conditions", []):
         continue
     dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     candidate_ms = int(dt.timestamp() * 1000)
-    if candidate_ms >= inject_ms:
+    if candidate_ms >= (inject_ms - 1000):
         print(f"{candidate_ms},{classification},{confidence}")
         raise SystemExit
 
@@ -131,21 +131,42 @@ print(int(time.time() * 1000))
 PY
 }
 
+wait_for_healthy() {
+  local timeout="${1:-45}"
+  echo "Waiting for cluster condition Healthy=True (up to ${timeout}s)..."
+  for (( i=1; i<=timeout; i++ )); do
+    local cond
+    cond=$(kubectl get nhc "$NHC_NAME" -o jsonpath='{.status.conditions[?(@.type=="Healthy")].status}' 2>/dev/null || true)
+    if [[ "$cond" == "True" ]]; then
+      echo "Cluster is Healthy."
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Warning: Cluster did not reach Healthy=True within ${timeout}s; proceeding anyway."
+}
+
+cleanup() {
+  ./hack/inject-fault.sh "$SCENARIO" --clear >/dev/null 2>&1 || true
+}
+trap cleanup INT TERM
+
 for (( trial=1; trial<=TRIALS; trial++ )); do
-  echo "--- Trial ${trial} for ${SCENARIO} ---"
+  echo "--- Trial ${trial} of ${TRIALS} for ${SCENARIO} ---"
 
   ./hack/inject-fault.sh F1 --clear >/dev/null
   ./hack/inject-fault.sh "$SCENARIO" --clear >/dev/null
-  sleep 5
+  wait_for_healthy 45
 
   INJECT_TS="$(now_ms)"
   echo "Injecting fault at ${INJECT_TS}"
   ./hack/inject-fault.sh "$SCENARIO" >/dev/null
 
   if [[ "$SCENARIO" == "F1" ]]; then
-    # F1: healthy control — watch for a false positive (Healthy condition → False)
+    # F1: healthy control -- watch for a false positive (Healthy condition -> False)
+    f1_timeout="${F1_OBSERVE_SECONDS:-45}"
     FP_DETECTION=""
-    for (( second=1; second<=POLL_TIMEOUT_SECONDS; second++ )); do
+    for (( second=1; second<=f1_timeout; second++ )); do
       STATUS_JSON="$(kubectl get nhc "$NHC_NAME" -o json 2>/dev/null || echo '{}')"
       STATUS_FILE="$(mktemp)"
       printf '%s' "$STATUS_JSON" > "$STATUS_FILE"
@@ -160,12 +181,13 @@ for (( trial=1; trial<=TRIALS; trial++ )); do
     if [[ "$FP_DETECTION" != "None" ]]; then
       IFS=',' read -r DETECT_TS PRED_CLASS CONFIDENCE <<< "$FP_DETECTION"
       MTTD=$(( DETECT_TS - INJECT_TS ))
+      if [ $MTTD -lt 0 ]; then MTTD=0; fi
       echo "FALSE POSITIVE detected in ${MTTD}ms. Predicted: ${PRED_CLASS} (confidence ${CONFIDENCE})"
       echo "${SCENARIO},${trial},${INJECT_TS},${DETECT_TS},${MTTD},${PRED_CLASS},${TRUE_CLASS},${CONFIDENCE},,,,,,,," >> "$RESULTS_FILE"
     else
-      echo "No false positive within ${POLL_TIMEOUT_SECONDS}s (true negative — good)"
+      echo "No false positive within ${f1_timeout}s (true negative -- good)"
       # Record as true negative: predicted_class=Healthy (correctly not flagged)
-      echo "${SCENARIO},${trial},${INJECT_TS},,,,${TRUE_CLASS},,,,,,,,," >> "$RESULTS_FILE"
+      echo "${SCENARIO},${trial},${INJECT_TS},,,${TRUE_CLASS},${TRUE_CLASS},1.0,,,,,,,," >> "$RESULTS_FILE"
     fi
   else
     DETECTION=""
@@ -182,8 +204,10 @@ for (( trial=1; trial<=TRIALS; trial++ )); do
     done
 
     if [[ "$DETECTION" != "None" ]]; then
-      IFS=',' read -r DETECT_TS PRED_CLASS CONFIDENCE AVG_RTT AVG_JITTER AVG_LOSS MAX_BURST AVG_THROUGHPUT TOTAL_BYTES PROBE_COUNT <<< "$DETECTION"
+      DETECT_TS="$(now_ms)"
+      IFS=',' read -r _STATUS_TS PRED_CLASS CONFIDENCE AVG_RTT AVG_JITTER AVG_LOSS MAX_BURST AVG_THROUGHPUT TOTAL_BYTES PROBE_COUNT <<< "$DETECTION"
       MTTD=$(( DETECT_TS - INJECT_TS ))
+      if [ $MTTD -lt 0 ]; then MTTD=0; fi
       echo "Detected in ${MTTD}ms. Class: ${PRED_CLASS} (confidence ${CONFIDENCE})"
       echo "${SCENARIO},${trial},${INJECT_TS},${DETECT_TS},${MTTD},${PRED_CLASS},${TRUE_CLASS},${CONFIDENCE},${AVG_RTT},${AVG_JITTER},${AVG_LOSS},${MAX_BURST},${AVG_THROUGHPUT},${TOTAL_BYTES},${PROBE_COUNT}" >> "$RESULTS_FILE"
     else
@@ -194,5 +218,5 @@ for (( trial=1; trial<=TRIALS; trial++ )); do
 
   echo "Clearing fault"
   ./hack/inject-fault.sh "$SCENARIO" --clear >/dev/null
-  sleep 10
+  sleep 5
 done

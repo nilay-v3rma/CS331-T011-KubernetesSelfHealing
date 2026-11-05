@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Self-Heal Network Operator — 5-Minute Reproducible Demo
+# Self-Heal Network Operator -- 5-Minute Reproducible Demo
 # ============================================================================
-# Demonstrates: healthy mesh → fault injection → detection → recovery
+# Demonstrates: healthy mesh -> fault injection -> detection -> recovery
 #
 # Prerequisites:
 #   - KIND cluster running (run: make cluster-up)
@@ -26,19 +26,19 @@ NC='\033[0m'
 
 banner() {
   echo
-  echo -e "${CYAN}${BOLD}════════════════════════════════════════════════════════${NC}"
+  echo -e "${CYAN}${BOLD}================================================================================${NC}"
   echo -e "${CYAN}${BOLD}  $1${NC}"
-  echo -e "${CYAN}${BOLD}════════════════════════════════════════════════════════${NC}"
+  echo -e "${CYAN}${BOLD}================================================================================${NC}"
   echo
 }
 
 pause() {
-  echo -e "${YELLOW}  ▶ Press Enter to continue...${NC}"
+  echo -e "${YELLOW}  [>>] Press Enter to continue...${NC}"
   read -r
 }
 
 # ============================================================================
-banner "SELF-HEAL NETWORK OPERATOR — LIVE DEMO"
+banner "SELF-HEAL NETWORK OPERATOR -- LIVE DEMO"
 
 echo -e "${BOLD}This demo walks through:${NC}"
 echo "  1. Healthy mesh baseline"
@@ -48,7 +48,7 @@ echo "  4. Clearing the fault"
 echo "  5. Watching the mesh recover"
 echo
 echo -e "${BOLD}Cluster:${NC} ${CLUSTER_NAME}"
-echo -e "${BOLD}Time:${NC}    $(date --iso-8601=seconds)"
+echo -e "${BOLD}Time:${NC}    $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo
 
 # --- Step 1: Show healthy baseline ---
@@ -62,17 +62,17 @@ echo
 echo -e "${GREEN}NetworkHealthCheck status:${NC}"
 kubectl get nhc cluster-mesh -o yaml 2>/dev/null || echo "(CR not yet applied or operator not running)"
 echo
-echo -e "${GREEN}✓ All systems nominal.${NC}"
+echo -e "${GREEN}[OK] All systems nominal.${NC}"
 pause
 
 # --- Step 2: Inject fault F3 (node egress block) ---
-banner "Step 2/5: Injecting Fault — Node Egress Block (F3)"
+banner "Step 2/5: Injecting Fault -- Node Egress Block (F3)"
 echo -e "${RED}Blocking all outbound TCP :9376 traffic from pod-pod-selfheal-worker2...${NC}"
 echo
 "${SCRIPT_DIR}/inject-fault.sh" F3
 echo
-echo -e "${RED}✗ Fault injected. The operator should detect this within ~45 seconds.${NC}"
-echo -e "${YELLOW}  (interval=15s × failureThreshold=3 = 45s worst case)${NC}"
+echo -e "${RED}[!] Fault injected. The operator will debounce across 3 rounds (~85s).${NC}"
+echo -e "${YELLOW}  (interval=15s, failureThreshold=3 + mesh probe round duration ~85s)${NC}"
 pause
 
 # --- Step 3: Watch the operator detect and classify ---
@@ -98,7 +98,7 @@ done
 
 echo
 if [ "${DETECTED}" = true ]; then
-  echo -e "${RED}${BOLD}✗ FAULT DETECTED AND CLASSIFIED!${NC}"
+  echo -e "${RED}${BOLD}[OK] FAULT DETECTED AND CLASSIFIED!${NC}"
   echo
   echo -e "${BOLD}Full status:${NC}"
   kubectl get nhc cluster-mesh -o yaml 2>/dev/null | head -40
@@ -114,7 +114,7 @@ echo -e "${GREEN}Removing the iptables rule from pod-pod-selfheal-worker2...${NC
 echo
 "${SCRIPT_DIR}/inject-fault.sh" F3 --clear
 echo
-echo -e "${GREEN}✓ Fault cleared.${NC}"
+echo -e "${GREEN}[OK] Fault cleared.${NC}"
 pause
 
 # --- Step 5: Watch recovery ---
@@ -127,7 +127,7 @@ for i in $(seq 1 12); do
   VERDICT=$(kubectl get nhc cluster-mesh -o jsonpath='{.status.verdict}' 2>/dev/null || echo "")
 
   if [ "${VERDICT}" = "Healthy" ]; then
-    echo -e "  ${GREEN}[$(date +%T)] Verdict: ${VERDICT}  ✓ RECOVERED${NC}"
+    echo -e "  ${GREEN}[$(date +%T)] Verdict: ${VERDICT}  -- RECOVERED${NC}"
     RECOVERED=true
     break
   else
@@ -138,7 +138,7 @@ done
 
 echo
 if [ "${RECOVERED}" = true ]; then
-  echo -e "${GREEN}${BOLD}✓ MESH FULLY RECOVERED!${NC}"
+  echo -e "${GREEN}${BOLD}[OK] MESH FULLY RECOVERED!${NC}"
 else
   echo -e "${YELLOW}Recovery in progress (may need more time for successThreshold).${NC}"
 fi

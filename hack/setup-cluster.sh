@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CALICO_VERSION="v3.28.0"
 CALICO_URL="https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/calico.yaml"
 
-echo "=== Self-Heal Network Operator — Cluster Setup ==="
+echo "=== Self-Heal Network Operator -- Cluster Setup ==="
 echo "Cluster name: ${CLUSTER_NAME}"
 echo
 
